@@ -191,15 +191,20 @@ class Crawler:
 
     async def _upsert(self, it):
         now = _iso()
+        image = it.get("image")
+        if isinstance(image, str) and image.startswith("http://"):
+            image = "https://" + image[len("http://"):]
         bid = it.get("current_bid") or 0
-        vat = 25
-        buyer_fee = round(bid * 0.10)
+        vat = it.get("vat", 25)
+        buyer_fee = it["buyer_fee"] if it.get("buyer_fee") is not None else round(bid * 0.10)
         total_now = round(bid * (1 + vat / 100) + buyer_fee)
+        fixed_price = bool(it.get("fixed_price"))
         existing = await self.db.live_auctions.find_one({"url": it["url"]})
         if existing:
             keep_bid = (not bid) and existing.get("current_bid")
             update = {
-                "title": it["title"], "image": it.get("image"),
+                "title": it["title"], "image": image,
+                "fixed_price": fixed_price,
                 "last_seen": now,
             }
             if not keep_bid:
@@ -218,11 +223,11 @@ class Crawler:
             await self.db.live_auctions.update_one({"url": it["url"]}, {"$set": update})
         else:
             await self.db.live_auctions.insert_one({
-                "source": it["source"], "title": it["title"], "image": it.get("image"),
+                "source": it["source"], "title": it["title"], "image": image,
                 "current_bid": bid, "currency": "SEK", "vat": vat,
                 "buyer_fee": buyer_fee, "total_now": total_now, "url": it["url"],
                 "ends_at": it.get("ends_at"), "bid_count": it.get("bid_count"),
-                "starting_price": it.get("starting_price"),
+                "starting_price": it.get("starting_price"), "fixed_price": fixed_price,
                 "first_seen": now, "last_seen": now, "last_checked": now,
                 "price_history": [{"t": now, "bid": bid}] if bid else [],
             })

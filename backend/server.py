@@ -5,6 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
 import logging
+import time
 import uuid
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -16,6 +17,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import scraper
 import valuation
+import tradera
 from crawler import Crawler
 
 mongo_url = os.environ['MONGO_URL']
@@ -30,6 +32,7 @@ logger = logging.getLogger("auktion")
 logging.basicConfig(level=logging.INFO)
 
 SOURCE_LIST = list(scraper.SOURCES.values())
+_tradera_seen = {}  # q(lower) -> last upsert timestamp (throttles Tradera fetch)
 
 
 # ---------- Models ----------
@@ -221,9 +224,21 @@ async def live_status():
 
 @api_router.get("/live/auctions")
 async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, limit: int = 120):
+    # On search, augment the feed with live Tradera results (not background-crawled).
+    if q and len((q or "").strip()) >= 2:
+        key = q.strip().lower()
+        if time.time() - _tradera_seen.get(key, 0) > 120:
+            try:
+                for it in await tradera.search(q):
+                    await crawler._upsert(it)
+                _tradera_seen[key] = time.time()
+            except Exception:
+                logger.exception("Tradera augment failed")
     query = {}
     if source and source != "Alla":
         query["source"] = source
+    elif not q:
+        query["source"] = {"$ne": "Tradera"}  # Tradera only appears on search
     if q:
         query["title"] = {"$regex": q, "$options": "i"}
     docs = await db.live_auctions.find(query, {"_id": 0}).to_list(20000)

@@ -137,26 +137,20 @@ function App() {
               </p>
             </div>
           </div>
-          <Button onClick={() => setAddOpen(true)} data-testid="add-auction-button" className="bg-amber-500 text-slate-950 hover:bg-amber-600">
-            <Plus className="mr-1.5 h-4 w-4" /> <span className="hidden sm:inline">Bevaka auktion</span><span className="sm:hidden">Ny</span>
-          </Button>
-        </div>
-        {/* Sticky tab menu */}
-        <div className="mx-auto max-w-7xl px-4 pb-3 sm:px-6 lg:px-8">
-          <div className="inline-flex rounded-xl border border-slate-800 bg-[#111827] p-1" data-testid="view-toggle">
+          <div className="inline-flex shrink-0 rounded-xl border border-slate-800 bg-[#111827] p-1" data-testid="view-toggle">
             <button
               onClick={() => setView("live")}
               data-testid="view-live"
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${view === "live" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:px-4 sm:py-2 ${view === "live" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
             >
-              <Radar className="h-4 w-4" /> Live-flöde
+              <Radar className="h-4 w-4" /> <span className="hidden sm:inline">Live-flöde</span><span className="sm:hidden">Live</span>
             </button>
             <button
               onClick={() => setView("watch")}
               data-testid="view-watch"
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${view === "watch" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:px-4 sm:py-2 ${view === "watch" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
             >
-              <Layers className="h-4 w-4" /> Mina bevakningar {stats.total > 0 && <span className="rounded-full bg-slate-900/40 px-1.5 text-xs">{stats.total}</span>}
+              <Layers className="h-4 w-4" /> <span className="hidden sm:inline">Mina bevakningar</span><span className="sm:hidden">Bevakning</span> {stats.total > 0 && <span className="rounded-full bg-slate-900/40 px-1.5 text-xs">{stats.total}</span>}
             </button>
           </div>
         </div>

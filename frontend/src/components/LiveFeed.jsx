@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
-import { RefreshCw, Radar, ExternalLink, Plus, Search, Activity, Loader2 } from "lucide-react";
+import { RefreshCw, ExternalLink, Plus, Search, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +40,12 @@ const LiveCard = ({ a, onWatch, watching }) => {
     <div className="flex flex-1 flex-col gap-2 p-3">
       <h4 className="line-clamp-2 text-sm font-semibold text-slate-100" title={a.title}>{a.title}</h4>
       <div className="mt-auto">
-        {a.current_bid > 0 ? (
+        {a.fixed_price ? (
+          <>
+            <p className="text-[10px] font-mono uppercase tracking-wider text-pink-400">Fastpris · Köp nu</p>
+            <p className="font-heading text-lg font-bold text-slate-100">{formatSEK(a.starting_price || a.current_bid)}</p>
+          </>
+        ) : a.current_bid > 0 ? (
           <>
             <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Aktuellt bud{a.bid_count ? ` · ${a.bid_count} bud` : ""}</p>
             <p className="font-heading text-lg font-bold text-amber-400">{formatSEK(a.current_bid)}</p>
@@ -143,36 +148,29 @@ export const LiveFeed = ({ onWatchAdded }) => {
 
   return (
     <div data-testid="live-feed">
-      {/* Status bar */}
-      <div className="mb-5 rounded-xl border border-slate-800 bg-[#111827] p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="relative flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400">
-              <Radar className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="flex items-center gap-2 font-heading font-bold text-slate-100">
-                Auto-crawler
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${status?.running ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}`}>
-                  <Activity className="h-3 w-3" /> {status?.running ? "Aktiv" : "Stoppad"}
-                </span>
-              </p>
-              <p className="text-xs text-slate-400" data-testid="crawler-status-text">
-                Hämtar 1 objekt var {status?.interval_seconds || 10}:e sekund · {status?.live_count ?? 0} objekt i kö · {status?.last_action || "…"}
-              </p>
-            </div>
-          </div>
-          <Button onClick={handleSync} disabled={syncing} data-testid="sync-now-button" className="bg-amber-500 text-slate-950 hover:bg-amber-600">
-            {syncing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />} Synka nu
+      {/* Status bar (compact) */}
+      <div className="mb-4 rounded-lg border border-slate-800 bg-[#111827] px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+            <span className="relative flex h-2 w-2">
+              {status?.running && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />}
+              <span className={`relative inline-flex h-2 w-2 rounded-full ${status?.running ? "bg-emerald-500" : "bg-red-500"}`} />
+            </span>
+            Auto-crawler
+          </span>
+          <span className="text-xs text-slate-400" data-testid="crawler-status-text">
+            {status?.live_count ?? 0} objekt · 1 var {status?.interval_seconds || 10}:e s · {status?.last_action || "…"}
+          </span>
+          <Button size="sm" onClick={handleSync} disabled={syncing} data-testid="sync-now-button" className="ml-auto h-7 bg-amber-500 text-slate-950 hover:bg-amber-600">
+            {syncing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />} Synka
           </Button>
         </div>
-
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-1">
           {Object.entries(sources).map(([name, s]) => {
             const chip = STATUS_CHIP[s.status] || STATUS_CHIP.planned;
             return (
-              <span key={name} title={s.note} className={`cursor-help rounded-md border px-2 py-0.5 text-[11px] ${chip.cls}`} data-testid={`source-status-${name.replace(/\s+/g, "-").toLowerCase()}`}>
-                {name}: {chip.label}
+              <span key={name} title={s.note} className={`cursor-help rounded border px-1.5 py-0.5 text-[10px] ${chip.cls}`} data-testid={`source-status-${name.replace(/\s+/g, "-").toLowerCase()}`}>
+                {name}
               </span>
             );
           })}
