@@ -65,3 +65,17 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
   - `getAuctionItems([partId])` → objekt med `itemWinningBidValue` (bud), `itemEndTime`, moms, slagavgift, bild.
   - URL: `tovek.se/auktion/rop/{slug}/{itemId}`. ~160 objekt.
 - **7 aktiva källor nu:** Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden, Tovek. Testat 100% (iteration_5).
+
+## Blinto aktiverad via ScrapingBee – uppdaterat 2026-06 (ALLA 9 KÄLLOR AKTIVA)
+- **Blinto** scrapas nu via **ScrapingBee** (`SCRAPINGBEE_API_KEY` i backend/.env) med `render_js=true` som löser Cloudflare/anti-bot.
+  - `BlintoAdapter.discover()` (adapters.py): ett renderat anrop mot `blinto.se` ger hela katalogen (~1587 live-objekt) med titel, bild, aktuellt bud, antal bud och sluttid.
+  - Sluttid beräknas från `input.hidden-endtimes-input` (sekunder kvar → `ends_at`). Pris läses ur `.objectprice` (SEK). Bild läses ur `actualimg` (lazy-load; `_hidden_`-prefix strippas) med fallback till `src`.
+  - `refresh_item` = no-op (hela katalogen uppdateras per discovery-pass) för att spara ScrapingBee-krediter (1 anrop/pass istället för 1587).
+- **9 aktiva källor:** Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden, Tovek, PS Auction, Blinto.
+- **Netauktion/Tovek-bud verifierat**: bud synkas korrekt (Tovek-traktor visar 47 000 kr; ~86/130 Netauktion och ~85/164 Tovek har bud; 0-bud-objekt visar utropspris eller "Inga bud ännu"). Netauktion fyller bud gradvis via refresh (1 objekt/10s).
+- Testat via curl + screenshot (frontend visar Blinto-kort med rätt bilder/bud/nedräkning).
+
+## Nästa steg (kvar)
+- AI-prisvärdering mot riktig Toolab-data (valuation.py är idag LLM-genererad/uppskattad).
+- Push vid stundande avslut via externt system.
+- Prisfilter/sortering i live-flödet.

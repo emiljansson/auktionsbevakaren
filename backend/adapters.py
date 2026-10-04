@@ -9,9 +9,11 @@ Only sites reachable server-side (no anti-bot proxy) are ENABLED. Sites behind
 anti-bot / JS challenges (PS Auction, Blinto) or SPA sites without per-item
 links (Retrade) are reported in SOURCE_STATUS and stay disabled.
 """
+import os
 import re
 import json
 import logging
+from datetime import datetime, timezone, timedelta
 
 import httpx
 from bs4 import BeautifulSoup
@@ -66,6 +68,23 @@ def _netauktion_ends(text):
 async def _get(url):
     async with httpx.AsyncClient(headers=HEADERS, timeout=25, follow_redirects=True) as c:
         r = await c.get(url)
+        r.raise_for_status()
+        return r.text
+
+
+SCRAPINGBEE_API_KEY = os.environ.get("SCRAPINGBEE_API_KEY")
+
+
+async def _scrapingbee_get(url, render_js=True, wait=5000):
+    """Fetch a page through ScrapingBee (bypasses Cloudflare/anti-bot)."""
+    if not SCRAPINGBEE_API_KEY:
+        raise RuntimeError("SCRAPINGBEE_API_KEY saknas")
+    params = {"api_key": SCRAPINGBEE_API_KEY, "url": url, "country_code": "se"}
+    if render_js:
+        params["render_js"] = "true"
+        params["wait"] = str(wait)
+    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as c:
+        r = await c.get("https://app.scrapingbee.com/api/v1/", params=params)
         r.raise_for_status()
         return r.text
 
@@ -455,10 +474,70 @@ class PSAuctionAdapter:
         return None  # bids refreshed on each ~4h discovery pass (browser is heavy)
 
 
+class BlintoAdapter:
+    """Blinto via ScrapingBee (Cloudflare/anti-bot bypass with JS-rendering).
+
+    The listing page already carries every live object with title, price,
+    bid count and seconds-remaining, so one rendered fetch per discovery pass
+    refreshes the whole catalogue. refresh_item is a no-op to save credits.
+    """
+    source = "Blinto"
+    listing_url = "https://www.blinto.se/"
+
+    async def discover(self):
+        html = await _scrapingbee_get(self.listing_url, render_js=True, wait=6000)
+        soup = BeautifulSoup(html, "lxml")
+        ends = {i.get("id"): i.get("value")
+                for i in soup.select("input.hidden-endtimes-input")}
+        now = datetime.now(timezone.utc)
+        out = []
+        for c in soup.select("div.auction-product"):
+            a = c.find("a", href=True)
+            if not a or "/auction/" not in a["href"]:
+                continue
+            url = "https://www.blinto.se" + a["href"] if a["href"].startswith("/") else a["href"]
+            img = c.find("img")
+            title = None
+            if img:
+                title = (img.get("title") or img.get("alt") or "").strip() or None
+            if not title:
+                h3 = c.select_one("h3.brand-type")
+                title = h3.get_text(" ", strip=True) if h3 else "Blinto-objekt"
+            image = img.get("src") if img else None
+            if img:
+                raw_img = img.get("actualimg") or img.get("data-src") or img.get("src")
+                if raw_img:
+                    raw_img = raw_img.replace("_hidden_", "")
+                    image = None if ("bild_laddas" in raw_img or "notfound" in raw_img) else raw_img
+            price_el = c.select_one(".objectprice")
+            price = None
+            if price_el:
+                digits = re.sub(r"[^\d]", "", price_el.get_text(" ", strip=True))
+                price = int(digits) if digits else None
+            bids_el = c.select_one(".bids-amount")
+            bid_count = _bids_from_text(bids_el.get_text(" ", strip=True)) if bids_el else None
+            ends_at = None
+            oid = (c.get("id") or "").replace("card", "")
+            secs = ends.get("endtime_" + oid)
+            if secs and secs.isdigit() and int(secs) > 0:
+                ends_at = (now + timedelta(seconds=int(secs))).isoformat()
+            has_bids = bool(bid_count and bid_count > 0)
+            out.append({
+                "source": self.source, "title": title, "image": image,
+                "current_bid": price if has_bids else 0,
+                "starting_price": price if (not has_bids and price) else None,
+                "bid_count": bid_count, "ends_at": ends_at, "url": url,
+            })
+        return out
+
+    async def refresh_item(self, url):
+        return None  # full catalogue refreshes on each discovery pass
+
+
 # Active adapters (reliably scrapable server-side, with per-item links)
 ENABLED = [KlaravikAdapter(), BudiAdapter(), FabeoAdapter(),
            RetradeAdapter(), NetauktionAdapter(), KronofogdenAdapter(),
-           TovekAdapter(), PSAuctionAdapter()]
+           TovekAdapter(), PSAuctionAdapter(), BlintoAdapter()]
 
 # Reported to the UI so users understand coverage honestly
 SOURCE_STATUS = {
@@ -470,7 +549,7 @@ SOURCE_STATUS = {
     "Kronofogden": {"status": "active", "note": "Listar aktuella försäljningar (budgivning sker externt)."},
     "Tovek": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid, moms & slagavgift)."},
     "PS Auction": {"status": "active", "note": "Automatisk bevakning via headless webbläsare (löser AWS WAF). Uppdateras var ~4:e timme."},
-    "Blinto": {"status": "blocked", "note": "Anti-bot blockerar även renderande verktyg. Kräver premium-proxy."},
+    "Blinto": {"status": "active", "note": "Automatisk bevakning aktiv (via renderande proxy som löser anti-bot)."},
 }
 
 
