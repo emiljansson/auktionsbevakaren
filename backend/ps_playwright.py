@@ -43,6 +43,8 @@ CARD_JS = r"""() => {
       reserve_met: /Reservationspris uppn/i.test(t) ? true : (/(Inget|Utan) reservation/i.test(t) ? null : null),
       location: (t.match(/Plats:\s*([^\n]+)/)||[])[1] || null,
       time_left: (t.match(/Tid kvar:\s*([^\n]+)/)||[])[1] || null,
+      ended: /Avslutad/i.test(t),
+      ends_exact: (t.match(/(\d{4}-\d{2}-\d{2})[\sT]+(\d{2}:\d{2})/)||[]).slice(1).join(' ') || null,
       url: link.href,
     };
   }
@@ -50,15 +52,25 @@ CARD_JS = r"""() => {
 }"""
 
 
-def _ends_from_timeleft(s):
+def _parse_exact(s):
     if not s:
+        return None
+    m = re.match(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})", s.strip())
+    if not m:
+        return None
+    return f"{m.group(1)}T{m.group(2)}:00+02:00"
+
+
+def _ends_from_timeleft(s):
+    if not s or re.search(r"avslut", s, re.I):
         return None
     d = int((re.search(r"(\d+)\s*d", s) or [0, 0])[1]) if re.search(r"(\d+)\s*d", s) else 0
     h = int((re.search(r"(\d+)\s*h", s) or [0, 0])[1]) if re.search(r"(\d+)\s*h", s) else 0
     m = int((re.search(r"(\d+)\s*m", s) or [0, 0])[1]) if re.search(r"(\d+)\s*m", s) else 0
-    if d == 0 and h == 0 and m == 0:
+    sec = int((re.search(r"(\d+)\s*s", s) or [0, 0])[1]) if re.search(r"(\d+)\s*s(?!\w)", s) else 0
+    if d == 0 and h == 0 and m == 0 and sec == 0:
         return None
-    return (datetime.now(timezone.utc) + timedelta(days=d, hours=h, minutes=m)).isoformat()
+    return (datetime.now(timezone.utc) + timedelta(days=d, hours=h, minutes=m, seconds=sec)).isoformat()
 
 
 async def collect():
@@ -92,11 +104,11 @@ async def collect():
                     await page.wait_for_timeout(1500)
                     items = await page.evaluate(CARD_JS)
                     for it in items:
-                        if it["item_id"] in seen:
+                        if it["item_id"] in seen or it.get("ended"):
                             continue
                         seen.add(it["item_id"])
                         it["source"] = "PS Auction"
-                        it["ends_at"] = _ends_from_timeleft(it.get("time_left"))
+                        it["ends_at"] = _parse_exact(it.get("ends_exact")) or _ends_from_timeleft(it.get("time_left"))
                         it["current_bid"] = it.get("current_bid") or 0
                         results.append(it)
                     if len(results) >= MAX_ITEMS:

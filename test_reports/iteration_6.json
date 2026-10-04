@@ -1,0 +1,31 @@
+{
+  "summary": "Backend-only testing for new PS Auction (psauction.se) Playwright-based collector plus regression on all 8 live sources. Created /app/backend/tests/test_ps_auction.py (13 pytest tests, all passing). Validated: 242 PS items returned, all with non-empty titles, source='PS Auction', url matches ^https://psauction.se/item/view/\\d+/, current_bid is int >=0, 196/242 have positive bids with 47 distinct values (max 18,700 SEK) confirming real varied data (not duplicates). /api/live/status shows running=true with all 8 sources (Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden, Tovek, PS Auction) and no persistent errors. Regression confirms Netauktion titles are not 'Default Alt Text', Tovek has 100+ items with /auktion/rop/ urls, and every source persists title+url.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/live/status", "issue": "sites[].items counter transiently reports 0 while a source is in 'discovering' phase (and briefly at start of a crawling pass). Not a data bug (DB rows intact and /api/live/auctions returns full lists), but the per-tick counter is misleading for monitoring dashboards. Consider only resetting the counter after discovery completes, or exposing a separate 'last_items_count'."},
+      {"endpoint": "backend reload", "issue": "uvicorn WatchFiles watches /app/backend/tests/*; editing a test file triggered a reload that got stuck in 'Shutting down' for >1 min (likely waiting on Playwright/async crawler tasks to close). Had to supervisorctl restart backend. Consider excluding tests/ from reload_dirs or adding a shutdown timeout."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_ps_auction.py",
+    "/app/test_reports/pytest/ps_auction.xml"
+  ],
+  "action_items": [
+    "(Optional) Exclude backend/tests from uvicorn --reload-dir so test edits don't restart the running crawler.",
+    "(Optional) Make status.items a stable 'last known good count' rather than resetting to 0 during discovery."
+  ],
+  "critical_code_review_comments": [
+    "PSAuctionAdapter.refresh_item is intentionally a no-op; combined with crawler _upsert's bid-preservation this works, but if upstream drops an item from the discovery list its stored bid won't ever update. Acceptable for the ~4h cadence.",
+    "ps_playwright.collect launches a full Chromium per tick cycle; ensure a hard timeout and max-pages guard so a hung WAF challenge can't block the shutdown path (see minor reload-hang observation above)."
+  ],
+  "updated_files": ["/app/backend/tests/test_ps_auction.py"],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "n/a (no auth required)",
+  "seed_data_creation": "none; used live external data as ground truth",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_ps_auction.py covers PS collector + 8-source status regression. If PS source=0 briefly, it's a transient 'discovering' phase - DB data persists and /api/live/auctions still returns items. Avoid editing files under /app/backend/tests while a Playwright crawl is in-flight; the reloader can hang - prefer supervisorctl restart backend if that happens. PS item URLs are AWS-WAF protected: validate URL format only, never assert HTTP 200.",
+  "rca of the issue": "No functional bugs found. Minor observations only (see backend_issues.minor)."
+}

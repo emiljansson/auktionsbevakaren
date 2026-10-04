@@ -226,8 +226,25 @@ async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, l
         query["source"] = source
     if q:
         query["title"] = {"$regex": q, "$options": "i"}
-    docs = await db.live_auctions.find(query, {"_id": 0}).sort("last_seen", -1).to_list(limit)
-    return docs
+    docs = await db.live_auctions.find(query, {"_id": 0}).to_list(3000)
+    now = datetime.now(timezone.utc)
+    far = datetime.max.replace(tzinfo=timezone.utc)
+
+    def end_dt(d):
+        e = d.get("ends_at")
+        if not e:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(e).replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    # Keep only ongoing (no end time, or end time in the future).
+    live = [d for d in docs if (end_dt(d) is None or end_dt(d) > now)]
+    # Stable order: soonest-ending first, items without an end time last.
+    live.sort(key=lambda d: (end_dt(d) is None, end_dt(d) or far))
+    return live[:limit]
 
 
 @api_router.post("/live/sync")
