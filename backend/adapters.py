@@ -11,6 +11,7 @@ links (Retrade) are reported in SOURCE_STATUS and stay disabled.
 """
 import re
 import json
+import logging
 
 import httpx
 from bs4 import BeautifulSoup
@@ -409,9 +410,26 @@ class TovekAdapter:
         return {"ends_at": ends} if ends else None
 
 
+class PSAuctionAdapter:
+    """PS Auction via headless Chromium (AWS WAF challenge solved by the browser)."""
+    source = "PS Auction"
+
+    async def discover(self):
+        try:
+            import ps_playwright
+            return await ps_playwright.collect()
+        except Exception as e:
+            logging.getLogger("adapters").warning("PS Auction collect failed: %s", e)
+            return []
+
+    async def refresh_item(self, url):
+        return None  # bids refreshed on each ~4h discovery pass (browser is heavy)
+
+
 # Active adapters (reliably scrapable server-side, with per-item links)
 ENABLED = [KlaravikAdapter(), BudiAdapter(), FabeoAdapter(),
-           RetradeAdapter(), NetauktionAdapter(), KronofogdenAdapter(), TovekAdapter()]
+           RetradeAdapter(), NetauktionAdapter(), KronofogdenAdapter(),
+           TovekAdapter(), PSAuctionAdapter()]
 
 # Reported to the UI so users understand coverage honestly
 SOURCE_STATUS = {
@@ -422,7 +440,7 @@ SOURCE_STATUS = {
     "Netauktion": {"status": "active", "note": "Automatisk bevakning aktiv (objekt per auktion)."},
     "Kronofogden": {"status": "active", "note": "Listar aktuella försäljningar (budgivning sker externt)."},
     "Tovek": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid, moms & slagavgift)."},
-    "PS Auction": {"status": "needs_key", "note": "Nåbar endast via renderande skrap-tjänst (Cloudflare). Lägg till SCRAPER_API_KEY för att aktivera."},
+    "PS Auction": {"status": "active", "note": "Automatisk bevakning via headless webbläsare (löser AWS WAF). Uppdateras var ~4:e timme."},
     "Blinto": {"status": "blocked", "note": "Anti-bot blockerar även renderande verktyg. Kräver premium-proxy."},
 }
 
