@@ -328,7 +328,7 @@ SOURCE_STATUS = {
     "Retrade": {"status": "active", "note": "Automatisk bevakning aktiv (per-objekt-länkar)."},
     "Netauktion": {"status": "active", "note": "Automatisk bevakning aktiv (objekt per auktion)."},
     "Kronofogden": {"status": "active", "note": "Listar aktuella försäljningar (budgivning sker externt)."},
-    "Tovek": {"status": "planned", "note": "Kräver inloggning för budvisning – adapter ej byggd."},
+    "Tovek": {"status": "needs_key", "note": "JS-renderad (tom server-side) och bud kräver inloggning. Kräver renderande skrap-tjänst + inloggning – ej byggbar server-side nu."},
     "PS Auction": {"status": "needs_key", "note": "Nåbar endast via renderande skrap-tjänst (Cloudflare). Lägg till SCRAPER_API_KEY för att aktivera."},
     "Blinto": {"status": "blocked", "note": "Anti-bot blockerar även renderande verktyg. Kräver premium-proxy."},
 }

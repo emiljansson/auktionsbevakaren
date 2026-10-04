@@ -171,11 +171,15 @@ class Crawler:
         total_now = round(bid * (1 + vat / 100) + buyer_fee)
         existing = await self.db.live_auctions.find_one({"url": it["url"]})
         if existing:
+            keep_bid = (not bid) and existing.get("current_bid")
             update = {
                 "title": it["title"], "image": it.get("image"),
-                "current_bid": bid, "buyer_fee": buyer_fee, "total_now": total_now,
                 "last_seen": now,
             }
+            if not keep_bid:
+                update["current_bid"] = bid
+                update["buyer_fee"] = buyer_fee
+                update["total_now"] = total_now
             if it.get("ends_at"):
                 update["ends_at"] = it["ends_at"]
             if it.get("bid_count") is not None:

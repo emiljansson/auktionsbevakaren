@@ -1,0 +1,35 @@
+{
+  "summary": "Netauktion price bug fix validated against live product pages. New pytest suite /app/backend/tests/test_netauktion_price_fix.py (8 tests, all PASS) + existing /app/backend/tests/test_live_netauktion.py (10 tests, all PASS) = 18/18 green. For every sampled Netauktion item with current_bid>0 (e.g. 'Pallgafflar'=400, 'Tappningslinje'=200, 'PROVAUKTION'=1200, 'Vita viner'=600), our stored current_bid exactly equals the live product-page '.auction-bid-box-body-price' / 'Nuvarande bud <N> SEK' and does NOT equal the page's 'Marknadsvärde' estimate. ends_at is populated and ISO-parseable for ~100% of Netauktion items. /api/live/status: running=true, Netauktion present with no persistent error. Regression on Klaravik/Budi/Retrade: items have non-empty title+url and majority have current_bid>0.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "crawler._upsert", "issue": "On re-discovery, NetauktionAdapter.discover() returns current_bid=0 by design, and _upsert unconditionally overwrites the existing document's current_bid with 0. This wipes previously refreshed Netauktion bids until the per-item refresh loop (one item / 10s, ~25 min for 150 items) re-reads them. Observed: after POST /api/live/sync, bid>0 count on Netauktion dropped from 8 to 1, then slowly recovered. Fix: in _upsert, if incoming bid==0 and existing.current_bid>0, keep the existing current_bid / total_now / buyer_fee (only refresh last_seen, title, image, ends_at)."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_netauktion_price_fix.py",
+    "/app/backend/tests/test_live_netauktion.py",
+    "/app/test_reports/pytest/netauktion_price_fix.xml"
+  ],
+  "action_items": [
+    "Optional (minor): Guard crawler._upsert against overwriting an existing positive current_bid with the discovery-time 0 for Netauktion (prevents transient 'bud 0 kr' flicker right after a re-sync)."
+  ],
+  "critical_code_review_comments": [
+    "adapters.NetauktionAdapter.refresh_item correctly prefers '.auction-bid-box-body-price' and falls back to 'Nuvarande bud ... SEK' regex — both verified live.",
+    "_netauktion_ends assumes +02:00; this is correct for CEST but will drift to CET (+01:00) in winter. Consider using pytz 'Europe/Stockholm' for accurate DST handling.",
+    "crawler._upsert overwrites current_bid with 0 on every re-discovery for Netauktion — reported as minor regression above."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_netauktion_price_fix.py",
+    "/app/test_reports/pytest/netauktion_price_fix.xml",
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": {"backend": "100% (18/18 tests)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "N/A (no auth)",
+  "seed_data_creation": "None. Tests validate against live scraped data populated by the background crawler.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_netauktion_price_fix.py avoids triggering POST /api/live/sync because sync reruns NetauktionAdapter.discover(), which returns current_bid=0 and (via crawler._upsert) temporarily resets stored bids to 0 until the refresh loop (1 item / 10s) catches up. If a future test needs more items-with-bids, wait rather than sync. Run with: pytest backend/tests/test_netauktion_price_fix.py -o 'addopts=' (pytest.ini uses xdist loadscope which trips on single-file runs).",
+  "rca of the issue": "RCA (original bug): NetauktionAdapter.discover previously parsed the price from the listing card text, but netauktion.se only renders 'Marknadsvärde: <N> kr' (an estimate) on the card — not the current bid. So current_bid was set to the estimate (e.g. 250 000 kr) instead of the real bid (e.g. 400 kr). Fix (verified): discover() now sets current_bid=0 and captures ends_at from 'Avslutas:'; refresh_item() reads the real bid from '.auction-bid-box-body-price' or the 'Nuvarande bud <N> SEK' regex on the product page. Live verification: Pallgafflar our=400 vs page Nuvarande=400 (Marknadsvärde 6500); PROVAUKTION our=1200 vs page=1200; Tappningslinje=200; Vita viner=600 — all match. Residual minor issue: crawler._upsert still unconditionally writes current_bid=0 on each re-discovery for Netauktion (because discovery returns 0), temporarily wiping refreshed bids after each /api/live/sync."
+}
