@@ -33,6 +33,13 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - P2: Mer relevanta objektbilder (hämta per produkttyp)
 - P2: Rate limiting på /analyze (öppen app)
 
+## Automatisk bevakning (crawler) – tillagt 2026-06
+- Bakgrunds-crawler (`crawler.py`) hämtar 1 objekt var 10:e sekund (skonsam takt) och roterar genom källorna; kör periodisk discovery (var 10:e min) + observerar prisändringar → `price_history`.
+- Site-adaptrar (`adapters.py`): **Klaravik aktiv** (riktig JSON-LD-skrapning, ~60 live-objekt). PS Auction = kräver renderande skrap-tjänst (SCRAPER_API_KEY), Blinto = blockerad (premium anti-bot), övriga 6 = planerade adaptrar.
+- Endpoints: GET /api/live/status, GET /api/live/auctions, POST /api/live/sync, POST /api/live/watch.
+- Frontend: vy-växlare "Live-flöde" / "Mina bevakningar"; live-grid auto-uppdateras var 10:e s, källstatus-chips, "Synka nu", "Bevaka" sparar till mina bevakningar.
+
 ## Nästa steg
-- Riktig periodisk bevakning + notiser
-- Site-adaptrar för budhistorik
+- Aktivera PS Auction via renderande skrap-API (ScrapingBee/ScraperAPI/Firecrawl) + nyckel
+- Bygg adaptrar för Netauktion, Retrade, Budi, Fabeo, Kronofogden (nåbara direkt)
+- Notiser när bud höjs / fyndlarm

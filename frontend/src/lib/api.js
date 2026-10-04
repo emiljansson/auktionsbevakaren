@@ -12,6 +12,10 @@ export const api = {
   refresh: (id) => axios.post(`${API}/auctions/${id}/refresh`).then((r) => r.data),
   remove: (id) => axios.delete(`${API}/auctions/${id}`).then((r) => r.data),
   stats: () => axios.get(`${API}/stats`).then((r) => r.data),
+  liveStatus: () => axios.get(`${API}/live/status`).then((r) => r.data),
+  liveAuctions: (params) => axios.get(`${API}/live/auctions`, { params }).then((r) => r.data),
+  liveSync: () => axios.post(`${API}/live/sync`).then((r) => r.data),
+  liveWatch: (url) => axios.post(`${API}/live/watch`, { url }).then((r) => r.data),
 };
 
 export default api;

@@ -16,10 +16,12 @@ load_dotenv(ROOT_DIR / '.env')
 
 import scraper
 import valuation
+from crawler import Crawler
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+crawler = Crawler(db)
 
 app = FastAPI(title="Auktionsbevakning API")
 api_router = APIRouter(prefix="/api")
@@ -208,6 +210,50 @@ async def stats():
     }
 
 
+# ---------- Live auto-crawl ----------
+@api_router.get("/live/status")
+async def live_status():
+    count = await db.live_auctions.count_documents({})
+    s = crawler.status()
+    s["live_count"] = count
+    return s
+
+
+@api_router.get("/live/auctions")
+async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, limit: int = 120):
+    query = {}
+    if source and source != "Alla":
+        query["source"] = source
+    if q:
+        query["title"] = {"$regex": q, "$options": "i"}
+    docs = await db.live_auctions.find(query, {"_id": 0}).sort("last_seen", -1).to_list(limit)
+    return docs
+
+
+@api_router.post("/live/sync")
+async def live_sync():
+    crawler.force_discovery = True
+    return {"ok": True, "message": "Synkning startad"}
+
+
+@api_router.post("/live/watch", response_model=Auction)
+async def watch_live(payload: WatchCreate):
+    doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Live-auktion hittades inte.")
+    history = scraper.generate_bid_history(doc["current_bid"], max(len(doc.get("price_history", [])), 3))
+    auction = Auction(
+        source=doc["source"], title=doc["title"], image=doc.get("image"),
+        category=payload.category or "Övrigt", current_bid=doc["current_bid"],
+        bid_count=max(len(doc.get("price_history", [])), 1),
+        vat=doc.get("vat", 25), buyer_fee=doc.get("buyer_fee", 0),
+        total_now=doc.get("total_now", doc["current_bid"]),
+        url=doc["url"], scraped=True, bid_history=history,
+    )
+    await db.auctions.insert_one(auction.model_dump())
+    return auction
+
+
 app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
@@ -218,6 +264,13 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup():
+    await db.live_auctions.create_index("url", unique=True)
+    crawler.start()
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    await crawler.stop()
     client.close()
