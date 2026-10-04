@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Clock, Gavel, ExternalLink, Trash2, Sparkles, TrendingDown, TrendingUp, Minus } from "lucide-react";
+import { Clock, Gavel, ExternalLink, Trash2, Sparkles, TrendingDown, TrendingUp, Minus, Coins } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { badgeClass, formatSEK, timeLeft } from "@/lib/sources";
@@ -44,6 +44,15 @@ export const AuctionCard = ({ auction, onOpen, onDelete }) => {
         )}
         {!auction.scraped && (
           <span className="absolute bottom-2 right-3 rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] font-mono text-slate-400">simulerad data</span>
+        )}
+        {auction.fee_known && (
+          <div
+            data-testid="fee-known-badge"
+            title="Ekonomi uppdaterad med exakt slagavgift + moms"
+            className="absolute bottom-2 left-3 flex items-center gap-1 rounded-full border border-amber-300/60 bg-gradient-to-br from-amber-300 to-amber-500 px-2 py-0.5 text-[11px] font-bold text-slate-950 shadow-md shadow-amber-500/40"
+          >
+            <Coins className="h-3.5 w-3.5" /> Inkl. avgift
+          </div>
         )}
       </div>
 

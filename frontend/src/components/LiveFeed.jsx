@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
-import { RefreshCw, ExternalLink, Plus, Search, Loader2 } from "lucide-react";
+import { RefreshCw, ExternalLink, Plus, Search, Loader2, Coins } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,15 @@ const LiveCard = ({ a, onWatch, watching }) => {
       {tl && (
         <div className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold backdrop-blur-md ${tl.ended ? "bg-slate-900/80 text-slate-400" : "bg-amber-500/90 text-slate-950"}`}>
           {tl.ended ? "Avslutad" : `⏱ ${tl.label}`}
+        </div>
+      )}
+      {a.fee_known && (
+        <div
+          data-testid="fee-known-badge"
+          title="Ekonomi uppdaterad med exakt slagavgift + moms"
+          className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full border border-amber-300/60 bg-gradient-to-br from-amber-300 to-amber-500 px-2 py-0.5 text-[10px] font-bold text-slate-950 shadow-md shadow-amber-500/40"
+        >
+          <Coins className="h-3 w-3" /> Inkl. avgift
         </div>
       )}
     </div>
