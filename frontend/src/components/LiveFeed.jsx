@@ -156,15 +156,15 @@ export const LiveFeed = ({ onWatchAdded }) => {
     <div data-testid="live-feed">
       {/* Status bar (compact) */}
       <div className="mb-4 rounded-lg border border-slate-800 bg-[#111827] px-3 py-2.5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+        <div className="flex items-center gap-x-3">
+          <span className="flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-100">
             <span className="relative flex h-2 w-2">
               {status?.running && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />}
               <span className={`relative inline-flex h-2 w-2 rounded-full ${status?.running ? "bg-emerald-500" : "bg-red-500"}`} />
             </span>
             Auto-crawler
           </span>
-          <span className="text-xs text-slate-400" data-testid="crawler-status-text">
+          <span className="min-w-0 truncate text-xs text-slate-400" data-testid="crawler-status-text">
             {status?.live_count ?? 0} objekt · uppdaterar 1 var {status?.interval_seconds || 10}:e sekund · {status?.last_action || "…"}
           </span>
         </div>
