@@ -551,7 +551,9 @@ class BlintoAdapter:
 # Active adapters (reliably scrapable server-side, with per-item links)
 ENABLED = [KlaravikAdapter(), BudiAdapter(), FabeoAdapter(),
            RetradeAdapter(), NetauktionAdapter(),
-           TovekAdapter(), PSAuctionAdapter(), BlintoAdapter()]
+           TovekAdapter(), BlintoAdapter()]
+# PS Auction is crawled on a dedicated background task (see crawler._ps_loop)
+# because its ScrapingBee crawl is slow and would block the per-tick loop.
 
 # Reported to the UI so users understand coverage honestly
 SOURCE_STATUS = {

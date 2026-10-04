@@ -1,14 +1,24 @@
-"""PS Auction collector via ScrapingBee (premium proxy + JS rendering).
+"""PS Auction collector via ScrapingBee (premium/residential proxy).
 
-PS Auction sits behind an AWS WAF JS challenge. ScrapingBee's premium proxy
-solves the challenge and returns the fully rendered auction/item HTML, which we
-parse with BeautifulSoup. We fetch the auctions index, pick the RUNNING
-auctions, then read each auction's item cards (title, image, current bid, bid
-count, time left). Resource/credit-bounded: index + a capped number of auctions
-per run (the crawler calls this every ~4h).
+PS Auction sits behind an AWS WAF challenge; ScrapingBee's premium proxy returns
+the real HTML (no JS rendering needed, 25 credits/page). The site tree is:
+  /auctions                     -> lists all auctions (1 page)
+  /auction/{id}/{slug}/sida=N   -> 48 items per page (paginated)
+  /item/view/{id}               -> single item
+
+Because every page costs 25 ScrapingBee credits and there are ~3300 live items,
+we crawl on a BUDGET-AWARE, TIME-GATED cadence (checked BEFORE any network call
+so the crawler can poll cheaply):
+  * FULL pass (every PS_FULL_INTERVAL_H, default 24h): every running auction,
+    fully paginated -> captures ALL items incl. ones ending days out.
+  * SOON pass (every PS_SOON_INTERVAL_H, default 12h): only auctions ending
+    within PS_SOON_WINDOW_H (default 24h) -> keeps bids fresh where it matters.
+  * Otherwise returns [] without touching the network (0 credits).
 """
 import os
 import re
+import time
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -20,27 +30,63 @@ logger = logging.getLogger("ps_playwright")
 INDEX_URL = "https://psauction.se/auctions"
 BASE = "https://psauction.se"
 MAX_AUCTIONS = int(os.environ.get("PS_MAX_AUCTIONS", "500"))
-MAX_ITEMS = int(os.environ.get("PS_MAX_ITEMS", "5000"))
-CONCURRENCY = int(os.environ.get("PS_CONCURRENCY", "5"))
+MAX_ITEMS = int(os.environ.get("PS_MAX_ITEMS", "8000"))
+CONCURRENCY = int(os.environ.get("PS_CONCURRENCY", "10"))
+PAGE_SIZE = 48  # PS Auction shows 48 items per auction page (/sida=N)
+MAX_PAGES = int(os.environ.get("PS_MAX_PAGES", "20"))
+
+FULL_INTERVAL = int(os.environ.get("PS_FULL_INTERVAL_H", "72")) * 3600
+SOON_INTERVAL = int(os.environ.get("PS_SOON_INTERVAL_H", "24")) * 3600
+SOON_WINDOW = int(os.environ.get("PS_SOON_WINDOW_H", "24")) * 3600
 
 SCRAPINGBEE_API_KEY = os.environ.get("SCRAPINGBEE_API_KEY")
 _API = "https://app.scrapingbee.com/api/v1/"
 
-# matches a countdown token like "14h13m", "2d 3h", "45m", "3H30M"
-_TIME_RE = re.compile(r"\b\d+\s*[Dd]\b|\d+\s*[Hh]\s*\d+\s*[Mm]|\b\d+\s*[Hh]\b|\b\d+\s*[Mm]\b")
+# Compact countdown tokens: "3D12H", "14H13M", "45M", "2D", "5H".
+_TIME_RE = re.compile(r"\d+[DdHhMm]")
+
+_last_full = 0.0
+_last_soon = 0.0
+_STATE_FILE = "/app/.ps_state.json"  # outside the uvicorn --reload watch dir
 
 
-async def _bee(url, wait=12000):
+def _load_state():
+    global _last_full, _last_soon
+    try:
+        import json
+        with open(_STATE_FILE) as f:
+            d = json.load(f)
+        _last_full = float(d.get("last_full", 0))
+        _last_soon = float(d.get("last_soon", 0))
+    except Exception:
+        pass
+
+
+def _save_state():
+    try:
+        import json
+        with open(_STATE_FILE, "w") as f:
+            json.dump({"last_full": _last_full, "last_soon": _last_soon}, f)
+    except Exception:
+        pass
+
+
+_load_state()
+
+
+async def _bee(url):
     if not SCRAPINGBEE_API_KEY:
         raise RuntimeError("SCRAPINGBEE_API_KEY saknas")
-    params = {
-        "api_key": SCRAPINGBEE_API_KEY, "url": url, "render_js": "true",
-        "premium_proxy": "true", "country_code": "se", "wait": str(wait),
-    }
+    params = {"api_key": SCRAPINGBEE_API_KEY, "url": url, "premium_proxy": "true", "country_code": "se"}
     async with httpx.AsyncClient(timeout=160, follow_redirects=True) as c:
         r = await c.get(_API, params=params)
         r.raise_for_status()
         return r.text
+
+
+def _parse_exact(s):
+    m = re.match(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})", (s or "").strip())
+    return f"{m.group(1)}T{m.group(2)}:00+02:00" if m else None
 
 
 def _ends_from_timeleft(s):
@@ -54,9 +100,17 @@ def _ends_from_timeleft(s):
     return (datetime.now(timezone.utc) + timedelta(days=d, hours=h, minutes=m)).isoformat()
 
 
-def _running_auction_urls(html):
+def _card_seconds(txt):
+    d = int((re.search(r"(\d+)[Dd]", txt) or [0, 0])[1]) if re.search(r"(\d+)[Dd]", txt) else 0
+    h = int((re.search(r"(\d+)[Hh]", txt) or [0, 0])[1]) if re.search(r"(\d+)[Hh]", txt) else 0
+    m = int((re.search(r"(\d+)[Mm]", txt) or [0, 0])[1]) if re.search(r"(\d+)[Mm]", txt) else 0
+    return (d * 86400 + h * 3600 + m * 60) or 10 ** 12
+
+
+def _running_auctions(html):
+    """Return [(seconds_left, url)] for running auctions, soonest-ending first."""
     soup = BeautifulSoup(html, "lxml")
-    out, seen = [], set()
+    seen, cand = set(), []
     for a in soup.select('a[href*="/auction/"]'):
         m = re.search(r"/auction/\d+/[^?#\"]+", a.get("href", ""))
         if not m:
@@ -68,8 +122,14 @@ def _running_auction_urls(html):
         if re.search(r"avslutad", txt, re.I) or not _TIME_RE.search(txt):
             continue
         seen.add(url)
-        out.append(url)
-    return out
+        cand.append((_card_seconds(txt), url))
+    cand.sort(key=lambda x: x[0])
+    return cand
+
+
+def _total_items(html):
+    m = re.search(r"Visar\s*[\d\u2013\-]+\s*av\s*(\d+)", html)
+    return int(m.group(1)) if m else None
 
 
 def _parse_items(html):
@@ -81,13 +141,13 @@ def _parse_items(html):
         if not mid or mid.group(1) in seen:
             continue
         full = a.get_text(" ", strip=True)
-        if re.search(r"avslutad", full, re.I):
+        if re.search(r"\bavslutad\b", full, re.I):
             continue  # ended item
         tl = re.search(r"Tid kvar:\s*([0-9]+\s*[DdHhMm][0-9DdHhMmSs\s]*)", full)
-        time_left = tl.group(1).strip() if tl else None
-        ends_at = _ends_from_timeleft(time_left)
+        ends_at = _ends_from_timeleft(tl.group(1).strip() if tl else None)
         if not ends_at:
-            continue  # no valid remaining time => not an active lot
+            dm = re.search(r"(\d{4}-\d{2}-\d{2})[\sT]+(\d{2}:\d{2})", full)
+            ends_at = _parse_exact(f"{dm.group(1)} {dm.group(2)}") if dm else None
         seen.add(mid.group(1))
         h2 = a.find("h2")
         img = a.find("img")
@@ -95,42 +155,75 @@ def _parse_items(html):
         bidm = re.search(r"([\d][\d\s\u00a0]*)\s*SEK", full)
         bid = int(bidm.group(1).replace("\u00a0", "").replace(" ", "")) if bidm else 0
         cntm = re.search(r"SEK\s*(\d+)\b", full)
-        bid_count = int(cntm.group(1)) if cntm else None
         out.append({
             "source": "PS Auction", "title": title,
             "image": img.get("src") if img else None,
-            "current_bid": bid, "bid_count": bid_count,
+            "current_bid": bid, "bid_count": int(cntm.group(1)) if cntm else None,
             "ends_at": ends_at,
             "url": BASE + href if href.startswith("/") else href,
         })
     return out
 
 
+async def _crawl_auction(au, sem):
+    async def page(url):
+        async with sem:
+            try:
+                return await _bee(url)
+            except Exception as e:
+                logger.warning("PS page failed %s: %s", url, e)
+                return None
+    html = await page(f"{au}/sida=1")
+    if not html:
+        return []
+    items = _parse_items(html)
+    total = _total_items(html)
+    if total and total > PAGE_SIZE:
+        pages = min((total + PAGE_SIZE - 1) // PAGE_SIZE, MAX_PAGES)
+        rest = await asyncio.gather(*[page(f"{au}/sida={p}") for p in range(2, pages + 1)])
+        for h in rest:
+            if h:
+                items.extend(_parse_items(h))
+    return items
+
+
 async def collect():
-    """Return list of PS Auction item records. Empty list on failure."""
-    import asyncio
+    """Budget-aware, time-gated PS Auction crawl. Returns item records (maybe [])."""
+    global _last_full, _last_soon
+    now = time.time()
+    if now - _last_full >= FULL_INTERVAL:
+        mode = "full"
+    elif now - _last_soon >= SOON_INTERVAL:
+        mode = "soon"
+    else:
+        return []  # gated — no network, no credits
     try:
         index_html = await _bee(INDEX_URL)
     except Exception as e:
         logger.warning("PS index fetch failed: %s", e)
         return []
-    auctions = _running_auction_urls(index_html)[:MAX_AUCTIONS]
-    logger.info("PS Auction: %s running auctions to crawl", len(auctions))
+    running = _running_auctions(index_html)
+    if mode == "soon":
+        targets = [u for s, u in running if s <= SOON_WINDOW][:MAX_AUCTIONS]
+    else:
+        targets = [u for _, u in running][:MAX_AUCTIONS]
+    logger.info("PS Auction %s pass: %s auctions", mode, len(targets))
     sem = asyncio.Semaphore(CONCURRENCY)
-
-    async def _one(au):
-        async with sem:
-            try:
-                html = await _bee(au)
-            except Exception as e:
-                logger.warning("PS auction page failed %s: %s", au, e)
-                return []
-            return _parse_items(html)
-
-    chunks = await asyncio.gather(*[_one(au) for au in auctions])
-    results = []
+    chunks = await asyncio.gather(*[_crawl_auction(au, sem) for au in targets])
+    results, seen = [], set()
     for ch in chunks:
-        results.extend(ch)
+        for it in ch:
+            if it["url"] in seen:
+                continue
+            seen.add(it["url"])
+            results.append(it)
         if len(results) >= MAX_ITEMS:
             break
+    # Only arm the time-gate after a successful crawl, so an interrupted run
+    # retries instead of locking out for the full interval.
+    if mode == "soon":
+        _last_soon = now
+    else:
+        _last_full = _last_soon = now
+    _save_state()
     return results[:MAX_ITEMS]

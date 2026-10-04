@@ -76,6 +76,8 @@ class Crawler:
         self.db = db
         self.states = [SiteState(a) for a in adapters.ENABLED]
         self.task = None
+        self.ps_task = None
+        self.ps_status = "väntar"
         self.running = False
         self.tick_count = 0
         self.last_tick = None
@@ -84,14 +86,38 @@ class Crawler:
         if self.task is None:
             self.running = True
             self.task = asyncio.create_task(self._loop())
+            self.ps_task = asyncio.create_task(self._ps_loop())
             logger.info("Crawler started: %s sites, interval=%ss, rest=%ss",
                         len(self.states), INTERVAL, REST_SECONDS)
 
     async def stop(self):
         self.running = False
-        if self.task:
-            self.task.cancel()
-            self.task = None
+        for t in (self.task, self.ps_task):
+            if t:
+                t.cancel()
+        self.task = None
+        self.ps_task = None
+
+    async def _ps_loop(self):
+        """PS Auction runs on its own task so its heavy, slow ScrapingBee crawl
+        never blocks the other sites. collect() is time-gated internally and
+        returns [] cheaply when no full/soon pass is due."""
+        import ps_playwright
+        await asyncio.sleep(5)
+        while self.running:
+            try:
+                items = await asyncio.wait_for(ps_playwright.collect(), timeout=900)
+                if items:
+                    for it in items:
+                        await self._upsert(it)
+                    self.ps_status = f"{len(items)} objekt ({_iso()[11:16]})"
+                    logger.info("PS Auction task upserted %s items", len(items))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.ps_status = f"fel: {e}"
+                logger.warning("PS task failed: %s", e)
+            await asyncio.sleep(1800)  # re-check gates every 30 min
 
     async def _loop(self):
         await asyncio.sleep(2)
@@ -242,6 +268,7 @@ class Crawler:
             "last_tick": self.last_tick,
             "last_action": actions,
             "sites": [s.to_dict() for s in self.states],
+            "ps_auction": self.ps_status,
             "sources": adapters.SOURCE_STATUS,
         }
 

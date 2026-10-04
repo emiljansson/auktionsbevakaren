@@ -77,6 +77,18 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - **PS Auction via ScrapingBee** (2026-06): Playwright-scrapern slutade fungera (AWS WAF `net::ERR_ABORTED`, 0 objekt). `ps_playwright.collect()` skrevs om till ScrapingBee (`premium_proxy=true` + `render_js` löser WAF): hämtar auktionsindex, filtrerar **pågående** auktioner (tid kvar, ej "Avslutad"), och parsar objektkort (h2-titel, cloudfront-bild, bud, antal bud, "Tid kvar" → ends_at). Cap: index + 10 auktioner/pass (~var 4:e h). Nu ~250 objekt. **Sökning funkar nu över alla källor** (t.ex. "såg" ger Blinto + PS Auction + Tovek m.fl.).
 - Testat via curl + screenshot (frontend visar Blinto-kort med rätt bilder/bud/nedräkning).
 
+## PS Auction full trädgenomgång + budget-styrd hybrid – uppdaterat 2026-06
+- **Problem**: PS visade bara ett fåtal objekt; objekt som slutar 3-5 dagar fram (t.ex. "Cirkelsåg - Festool HK 55 EBQ-Plus" i auktionen "Överskottsgods elverktyg från Festool") saknades.
+- **Rotorsaker & fix**:
+  1. **Filter**: `_running_auctions` krävde nedräknings-token men multi-dygns-kort visas som "3D12H" (siffror ihop) → regex `\d+[DdHhMm]`. Nu inkluderas auktioner som slutar flera dagar fram.
+  2. **Paginering**: varje auktion visar 48 objekt/sida via sökväg `/auction/{id}/{slug}/sida=N` (inte query-param). Insamlaren paginerar nu alla sidor (läser total ur "Visar X–Y av N").
+  3. **Behåll objekt utan parsbar sluttid** istället för att droppa dem.
+  4. **Proxy**: `premium_proxy=true` utan `render_js` (löser AWS WAF, 25 credits/sida, snabbare).
+- **Budget-styrd hybrid (ScrapingBee 75k/mån)**: tidsgrindad `collect()` — FULL katalog var `PS_FULL_INTERVAL_H` (72h) + budkoll på auktioner som slutar <24h var `PS_SOON_INTERVAL_H` (24h). Grind kollas FÖRE nätverksanrop (0 credits när inget är dags). Tidsstämplar persisteras i `/app/.ps_state.json` (utanför uvicorn --reload-mappen).
+- **Frikopplad bakgrundstask**: PS körs i `crawler._ps_loop` (egen asyncio-task, concurrency 10) så dess långsamma crawl aldrig blockerar övriga källor. PS borttagen ur `adapters.ENABLED`.
+- **Resultat**: ~3 265 PS-objekt (full katalog), 87 Festool-objekt, Cirkelsåg HK 55 sökbar. Övriga källor opåverkade.
+- Full katalog ≈ 4 675 credits; daglig full katalog (~140k/mån) ryms EJ i 75k → kräver plan-uppgradering. Nuvarande kadens håller sig inom 75k.
+
 ## Djupare täckning + "Ladda fler" + Kronofogden borttagen – uppdaterat 2026-06
 - **Visningsgräns borttagen i praktiken**: `/live/auctions` hämtar upp till 20 000 docs; frontend har en **"Ladda fler"-knapp** som växer gränsen i steg om 120 (verifierat 120→240). Paging återställs vid källbyte/sökning.
 - **PS Auction läser ALLA pågående auktioner** (ej längre bara 10): `PS_MAX_AUCTIONS=500`, parallellt med `asyncio.Semaphore(5)` för fart. ~21 pågående auktioner → ~340 objekt per pass.
