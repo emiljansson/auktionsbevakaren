@@ -230,6 +230,16 @@ class FabeoAdapter:
     source = "Fabeo"
     listing_url = "https://fabeo.se/auktioner/?orderby=auction_end"
 
+    @staticmethod
+    def _ends(node):
+        el = node.select_one(".auction-time-countdown[data-time]")
+        if not el:
+            return None
+        try:
+            return datetime.fromtimestamp(int(el["data-time"]), tz=timezone.utc).isoformat()
+        except Exception:
+            return None
+
     async def discover(self):
         soup = BeautifulSoup(await _get(self.listing_url), "lxml")
         out = []
@@ -244,6 +254,7 @@ class FabeoAdapter:
             out.append({
                 "source": self.source, "title": title, "image": image,
                 "current_bid": _price_from_text(text) or 0, "url": a.get("href"),
+                "ends_at": self._ends(card),
             })
         return out
 
@@ -259,8 +270,9 @@ class FabeoAdapter:
         res = {}
         if price:
             res["current_bid"] = price
-        if valid:
-            res["ends_at"] = valid
+        ends = self._ends(soup)
+        if ends:
+            res["ends_at"] = ends
         # Fabeo states the exact per-object slagavgift publicly, e.g.
         # "En slagavgift på 25 000 kr (exkl. moms) tillkommer."
         m = re.search(r"slagavgift\s*p[åa]\s*([\d\s\u00a0\.]+)\s*kr\s*\(exkl", text, re.I)
