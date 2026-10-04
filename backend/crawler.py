@@ -109,7 +109,7 @@ class Crawler:
         now = _now()
         docs = await self.db.live_auctions.find(
             {"ends_at": {"$ne": None}}, {"url": 1, "ends_at": 1}
-        ).to_list(5000)
+        ).to_list(20000)
         dead = []
         for d in docs:
             try:

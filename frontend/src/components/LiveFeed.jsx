@@ -80,16 +80,19 @@ export const LiveFeed = () => {
   const [loading, setLoading] = useState(true);
   const [watching, setWatching] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [limit, setLimit] = useState(120);
   const qRef = useRef(q);
   qRef.current = q;
   const srcRef = useRef(source);
   srcRef.current = source;
+  const limitRef = useRef(limit);
+  limitRef.current = limit;
 
   const load = useCallback(async () => {
     try {
       const [st, list] = await Promise.all([
         api.liveStatus(),
-        api.liveAuctions({ source: srcRef.current, q: qRef.current || undefined, limit: 120 }),
+        api.liveAuctions({ source: srcRef.current, q: qRef.current || undefined, limit: limitRef.current }),
       ]);
       setStatus(st);
       setItems(list);
@@ -106,7 +109,9 @@ export const LiveFeed = () => {
     return () => clearInterval(t);
   }, [load]);
 
-  useEffect(() => { load(); }, [source, load]);
+  // Reset paging when the filter/search changes
+  useEffect(() => { setLimit(120); }, [source]);
+  useEffect(() => { load(); }, [source, limit, load]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -177,7 +182,7 @@ export const LiveFeed = () => {
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()}
+          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (setLimit(120), load())}
             placeholder="Sök i live-flödet (t.ex. grävmaskin, traktor)..." data-testid="live-search"
             className="border-slate-700 bg-slate-900 pl-9 text-slate-100 placeholder:text-slate-600" />
         </div>
@@ -200,6 +205,15 @@ export const LiveFeed = () => {
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" data-testid="live-grid">
           {items.map((a) => <LiveCard key={a.url} a={a} onWatch={handleWatch} watching={watching} />)}
+        </div>
+      )}
+
+      {!loading && items.length >= limit && (
+        <div className="mt-6 flex justify-center">
+          <Button variant="outline" onClick={() => setLimit((l) => l + 120)} data-testid="load-more-button"
+            className="border-slate-700 text-slate-200 hover:bg-slate-800">
+            Ladda fler objekt
+          </Button>
         </div>
       )}
     </div>

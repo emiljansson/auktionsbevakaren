@@ -147,27 +147,38 @@ class BudiAdapter:
     listing_url = "https://www.budi.se/"
 
     async def discover(self):
-        soup = BeautifulSoup(await _get(self.listing_url), "lxml")
-        out = []
-        for a in soup.select("a.budi-auctionobject__card"):
-            if a.get("data-budi-auctionobject-isended") == "true":
-                continue
-            href = a.get("href", "")
-            if "/objekt/" not in href:
-                continue
-            img = a.find("img")
-            image = img.get("src") if img else None
-            if image and "notfound" in image:
-                image = None
-            title = (img.get("alt") if img else None) or "Budi-objekt"
-            text = a.get_text(" ", strip=True)
-            out.append({
-                "source": self.source, "title": title, "image": image,
-                "current_bid": _price_from_text(text) or 0,
-                "bid_count": _bids_from_text(text),
-                "ends_at": a.get("data-budi-auctionobject-endingdatetimeiso"),
-                "url": "https://www.budi.se" + href,
-            })
+        out, seen = [], set()
+        for page in range(1, 40):
+            url = f"https://www.budi.se/objekt?p={page}&s=rel" if page > 1 else "https://www.budi.se/objekt?s=rel"
+            try:
+                soup = BeautifulSoup(await _get(url), "lxml")
+            except Exception:
+                break
+            cards = soup.select("a.budi-auctionobject__card")
+            new = 0
+            for a in cards:
+                if a.get("data-budi-auctionobject-isended") == "true":
+                    continue
+                href = a.get("href", "")
+                if "/objekt/" not in href or href in seen:
+                    continue
+                seen.add(href)
+                new += 1
+                img = a.find("img")
+                image = img.get("src") if img else None
+                if image and "notfound" in image:
+                    image = None
+                title = (img.get("alt") if img else None) or "Budi-objekt"
+                text = a.get_text(" ", strip=True)
+                out.append({
+                    "source": self.source, "title": title, "image": image,
+                    "current_bid": _price_from_text(text) or 0,
+                    "bid_count": _bids_from_text(text),
+                    "ends_at": a.get("data-budi-auctionobject-endingdatetimeiso"),
+                    "url": "https://www.budi.se" + href,
+                })
+            if new == 0:
+                break
         return out
 
     async def refresh_item(self, url):
@@ -260,7 +271,7 @@ class NetauktionAdapter:
         soup = BeautifulSoup(await _get(self.base + "/auktion/display/"), "lxml")
         slugs = [a["href"] for a in soup.find_all("a", href=True)
                  if re.match(r"^/auktion/[^/]+$", a["href"])]
-        slugs = list(dict.fromkeys(slugs))[:20]
+        slugs = list(dict.fromkeys(slugs))
         out = []
         for slug in slugs:
             try:
@@ -299,8 +310,6 @@ class NetauktionAdapter:
                             "current_bid": bid or 0,
                             "ends_at": _netauktion_ends(text),
                             "url": self.base + u if u.startswith("/") else u})
-            if len(out) >= 300:
-                break
         return out
 
     async def refresh_item(self, url):
@@ -409,7 +418,7 @@ class TovekAdapter:
 
     async def discover(self):
         raw, seen_parts = [], set()
-        for page in range(1, 4):
+        for page in range(1, 25):
             data = await _tovek_action(TOVEK_ACT_AUCTIONS, [{"partStatus": "running"}, page])
             aucs = [a for a in data.get("auctions", []) if a.get("partStatus") == "running"]
             if not aucs:
@@ -434,8 +443,6 @@ class TovekAdapter:
                         "min": it.get("itemMinBid") or 0,
                         "ends_item": _tovek_ends(it.get("itemEndTime") or it.get("itemLastEndDate")),
                     })
-            if len(raw) >= 400:
-                break
         bids = await self._bids_map([r["iid"] for r in raw])
         out = []
         for r in raw:
@@ -543,7 +550,7 @@ class BlintoAdapter:
 
 # Active adapters (reliably scrapable server-side, with per-item links)
 ENABLED = [KlaravikAdapter(), BudiAdapter(), FabeoAdapter(),
-           RetradeAdapter(), NetauktionAdapter(), KronofogdenAdapter(),
+           RetradeAdapter(), NetauktionAdapter(),
            TovekAdapter(), PSAuctionAdapter(), BlintoAdapter()]
 
 # Reported to the UI so users understand coverage honestly
@@ -553,7 +560,6 @@ SOURCE_STATUS = {
     "Fabeo": {"status": "active", "note": "Automatisk bevakning aktiv."},
     "Retrade": {"status": "active", "note": "Automatisk bevakning aktiv (per-objekt-länkar)."},
     "Netauktion": {"status": "active", "note": "Automatisk bevakning aktiv (objekt per auktion)."},
-    "Kronofogden": {"status": "active", "note": "Listar aktuella försäljningar (budgivning sker externt)."},
     "Tovek": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid, moms & slagavgift)."},
     "PS Auction": {"status": "active", "note": "Automatisk bevakning via renderande proxy (löser AWS WAF). Uppdateras var ~4:e timme."},
     "Blinto": {"status": "active", "note": "Automatisk bevakning aktiv (via renderande proxy som löser anti-bot)."},

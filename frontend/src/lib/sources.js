@@ -1,6 +1,6 @@
 export const SOURCES = [
   "PS Auction", "Klaravik", "Blinto", "Tovek", "Netauktion",
-  "Retrade", "Budi", "Fabeo", "Kronofogden",
+  "Retrade", "Budi", "Fabeo",
 ];
 
 export const SOURCE_BADGES = {

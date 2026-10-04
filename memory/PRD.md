@@ -77,6 +77,14 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - **PS Auction via ScrapingBee** (2026-06): Playwright-scrapern slutade fungera (AWS WAF `net::ERR_ABORTED`, 0 objekt). `ps_playwright.collect()` skrevs om till ScrapingBee (`premium_proxy=true` + `render_js` löser WAF): hämtar auktionsindex, filtrerar **pågående** auktioner (tid kvar, ej "Avslutad"), och parsar objektkort (h2-titel, cloudfront-bild, bud, antal bud, "Tid kvar" → ends_at). Cap: index + 10 auktioner/pass (~var 4:e h). Nu ~250 objekt. **Sökning funkar nu över alla källor** (t.ex. "såg" ger Blinto + PS Auction + Tovek m.fl.).
 - Testat via curl + screenshot (frontend visar Blinto-kort med rätt bilder/bud/nedräkning).
 
+## Djupare täckning + "Ladda fler" + Kronofogden borttagen – uppdaterat 2026-06
+- **Visningsgräns borttagen i praktiken**: `/live/auctions` hämtar upp till 20 000 docs; frontend har en **"Ladda fler"-knapp** som växer gränsen i steg om 120 (verifierat 120→240). Paging återställs vid källbyte/sökning.
+- **PS Auction läser ALLA pågående auktioner** (ej längre bara 10): `PS_MAX_AUCTIONS=500`, parallellt med `asyncio.Semaphore(5)` för fart. ~21 pågående auktioner → ~340 objekt per pass.
+- **Budi paginerar** via `/objekt?p=N` (alla sidor) → ~1030 objekt (mot ~210).
+- **Netauktion/Tovek**: artificiella tak borttagna (Netauktion alla auktionssidor, Tovek upp till 25 sidor).
+- **Kronofogden borttagen** helt (ur ENABLED, SOURCE_STATUS, frontend SOURCES; 37 docs raderade). **8 aktiva källor** nu.
+- Totalt ~3 500 objekt. Klaravik (~60) och Retrade (~138) är server-renderade listor utan enkel paginering → ligger kvar på vad sidan exponerar.
+
 ## Nästa steg (kvar)
 - AI-prisvärdering mot riktig Toolab-data (valuation.py är idag LLM-genererad/uppskattad).
 - Push vid stundande avslut via externt system.

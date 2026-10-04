@@ -19,8 +19,9 @@ logger = logging.getLogger("ps_playwright")
 
 INDEX_URL = "https://psauction.se/auctions"
 BASE = "https://psauction.se"
-MAX_AUCTIONS = int(os.environ.get("PS_MAX_AUCTIONS", "10"))
-MAX_ITEMS = int(os.environ.get("PS_MAX_ITEMS", "500"))
+MAX_AUCTIONS = int(os.environ.get("PS_MAX_AUCTIONS", "500"))
+MAX_ITEMS = int(os.environ.get("PS_MAX_ITEMS", "5000"))
+CONCURRENCY = int(os.environ.get("PS_CONCURRENCY", "5"))
 
 SCRAPINGBEE_API_KEY = os.environ.get("SCRAPINGBEE_API_KEY")
 _API = "https://app.scrapingbee.com/api/v1/"
@@ -107,6 +108,7 @@ def _parse_items(html):
 
 async def collect():
     """Return list of PS Auction item records. Empty list on failure."""
+    import asyncio
     try:
         index_html = await _bee(INDEX_URL)
     except Exception as e:
@@ -114,14 +116,21 @@ async def collect():
         return []
     auctions = _running_auction_urls(index_html)[:MAX_AUCTIONS]
     logger.info("PS Auction: %s running auctions to crawl", len(auctions))
+    sem = asyncio.Semaphore(CONCURRENCY)
+
+    async def _one(au):
+        async with sem:
+            try:
+                html = await _bee(au)
+            except Exception as e:
+                logger.warning("PS auction page failed %s: %s", au, e)
+                return []
+            return _parse_items(html)
+
+    chunks = await asyncio.gather(*[_one(au) for au in auctions])
     results = []
-    for au in auctions:
-        try:
-            html = await _bee(au)
-        except Exception as e:
-            logger.warning("PS auction page failed %s: %s", au, e)
-            continue
-        results.extend(_parse_items(html))
+    for ch in chunks:
+        results.extend(ch)
         if len(results) >= MAX_ITEMS:
             break
     return results[:MAX_ITEMS]

@@ -226,7 +226,7 @@ async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, l
         query["source"] = source
     if q:
         query["title"] = {"$regex": q, "$options": "i"}
-    docs = await db.live_auctions.find(query, {"_id": 0}).to_list(3000)
+    docs = await db.live_auctions.find(query, {"_id": 0}).to_list(20000)
     now = datetime.now(timezone.utc)
     far = datetime.max.replace(tzinfo=timezone.utc)
 
