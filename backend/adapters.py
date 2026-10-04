@@ -555,7 +555,7 @@ SOURCE_STATUS = {
     "Netauktion": {"status": "active", "note": "Automatisk bevakning aktiv (objekt per auktion)."},
     "Kronofogden": {"status": "active", "note": "Listar aktuella försäljningar (budgivning sker externt)."},
     "Tovek": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid, moms & slagavgift)."},
-    "PS Auction": {"status": "active", "note": "Automatisk bevakning via headless webbläsare (löser AWS WAF). Uppdateras var ~4:e timme."},
+    "PS Auction": {"status": "active", "note": "Automatisk bevakning via renderande proxy (löser AWS WAF). Uppdateras var ~4:e timme."},
     "Blinto": {"status": "active", "note": "Automatisk bevakning aktiv (via renderande proxy som löser anti-bot)."},
 }
 
