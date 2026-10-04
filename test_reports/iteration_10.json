@@ -1,0 +1,35 @@
+{
+  "summary": "Verified Swedish crawler phases, Synka-knapp removal, per-source fees/VAT, and Tradera utropspris handling (API + UI). Found and fixed a Pydantic/server bug that broke POST /api/live/watch for Tradera (buyer_fee=None rejected by Auction model) AND the watched Tradera cards displayed 0 kr because starting_price was never persisted on the saved Auction. All 4 pytest cases pass, all 6 feature cases verified end-to-end after fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_fees_and_tradera.py",
+    "/app/test_reports/pytest/fees_tradera.xml"
+  ],
+  "action_items": [
+    "Review the two bug fixes made in /app/backend/server.py (Auction model: buyer_fee now Optional[int], added starting_price Optional[int], fee_known, fee_note; watch_live now passes these from live doc). Confirm no downstream consumers assume buyer_fee is non-null.",
+    "Old pre-fix Tradera watch rows persisted in DB (e.g. 'Flakmoped 1187 med Sachs motor') still display 0 kr because starting_price was not stored at insert time. Consider a one-time migration or re-sync from live_auctions to backfill starting_price for existing watched Tradera (and other) rows."
+  ],
+  "critical_code_review_comments": [
+    "server.py Auction model previously declared buyer_fee: int = 0, which caused a 500 on POST /api/live/watch for every source where crawler.compute_fees sets buyer_fee=None (Klaravik, Blinto, Fabeo, Netauktion, Retrade, Tovek, PS Auction). Any non-Budi/non-Tradera watch attempt would have failed. Fixed by changing to Optional[int].",
+    "server.py did not persist starting_price on watched auctions, so AuctionCard's `auction.starting_price || auction.current_bid` fallback always resolved to 0 for Tradera 0-bid items. Fixed by adding starting_price to Auction model and copying it from the live doc in watch_live.",
+    "There is still a dead endpoint POST /api/live/sync in server.py (crawler.sync_now) now unused after the UI 'Synka' removal. Consider deleting to reduce surface area."
+  ],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_fees_and_tradera.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Added one watched Tradera item (Slipsvamp Festool 120, id 842240d8...) via POST /api/live/watch to validate utropspris UI; deleted the first stale version and re-added after the fix. One other pre-existing stale Tradera row ('Flakmoped 1187') remains in DB and still shows 0 kr (expected per agent note).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 6 feature cases from iteration-10 request verified green after fixes: (1) crawler-status-text contains Swedish phrases 'uppdaterar bud'/'söker nya objekt'/'vilar' and the '1 var 10:e sekund' string; no English phases observed. (2) [data-testid=sync-now-button] absent. (3) Budi API returns fee_known=true, buyer_fee>0, vat=25, fee_note contains '16%'. Klaravik returns fee_known=false, buyer_fee=null, total_now≈bid*1.25, fee_note contains 'tillkommer'. (4) Tradera q=festool returned 15 zero-bid items with starting_price>0, vat=0, total_now==starting_price. (5) After bug fix, watching a Tradera 0-bid festool item adds it to Mina bevakningar as 'UTROPSPRIS · INGA BUD' with price 70 kr and 'Att betala (ca): 70 kr' + 'Privatköp – pris som visat (ingen slagavgift)'. (6) Live cards show 'att betala (ca)' when fee known and 'inkl. moms + avgift' when unknown.",
+  "rca of the issue": "Bug 1 (POST /api/live/watch 500): Auction Pydantic model required buyer_fee: int, but crawler.compute_fees returns buyer_fee=None for sources where the slag/service fee is unknown. Any watch attempt for Klaravik/Blinto/Fabeo/Netauktion/Retrade/Tovek/PS Auction raised ValidationError('buyer_fee int_type input_value=None'). Repro: curl POST /api/live/watch with any non-Budi/non-Tradera URL -> 500. Fix: buyer_fee: Optional[int] = 0 and populate fee_known/fee_note from live doc. Bug 2 (0 kr on watched Tradera): Auction model lacked starting_price, so watch_live never copied it from live_auctions. Frontend AuctionCard falls back to current_bid=0 → '0 kr'. Repro: watch any Tradera 0-bud item, open Mina bevakningar → price '0 kr'. Fix: add starting_price: Optional[int] to Auction and copy doc['starting_price'] in watch_live. Mitigation for existing stale rows: optional migration backfilling starting_price from live_auctions by url."
+}

@@ -49,10 +49,13 @@ class Auction(BaseModel):
     image: Optional[str] = None
     category: str = "Övrigt"
     current_bid: int
+    starting_price: Optional[int] = None
     bid_count: int
     currency: str = "SEK"
     vat: int = 25
-    buyer_fee: int = 0
+    buyer_fee: Optional[int] = 0
+    fee_known: bool = True
+    fee_note: Optional[str] = None
     total_now: int
     ends_at: Optional[str] = None
     url: str = ""
@@ -277,8 +280,10 @@ async def watch_live(payload: WatchCreate):
     auction = Auction(
         source=doc["source"], title=doc["title"], image=doc.get("image"),
         category=payload.category or "Övrigt", current_bid=doc["current_bid"],
+        starting_price=doc.get("starting_price"),
         bid_count=max(len(doc.get("price_history", [])), 1),
-        vat=doc.get("vat", 25), buyer_fee=doc.get("buyer_fee", 0),
+        vat=doc.get("vat", 25), buyer_fee=doc.get("buyer_fee"),
+        fee_known=doc.get("fee_known", True), fee_note=doc.get("fee_note"),
         total_now=doc.get("total_now", doc["current_bid"]),
         url=doc["url"], scraped=True, bid_history=history,
     )
