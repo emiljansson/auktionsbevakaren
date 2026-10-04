@@ -243,11 +243,17 @@ class NetauktionAdapter:
                 if not u:
                     continue
                 img = div.find("img")
-                title = ((img.get("alt") or img.get("title")) if img else None) or "Objekt"
+                card = div.find_parent("article") or div
+                tt = card.select_one(".object-card-title-text")
+                title = tt.get_text(" ", strip=True) if tt else None
+                if not title:
+                    alt = (img.get("alt") or img.get("title")) if img else None
+                    title = alt if alt and alt.lower() != "default alt text" else "Objekt"
+                title = re.sub(r"\s+", " ", title).strip()
+                title = re.sub(r",\s*\d+$", "", title).strip() or "Objekt"
                 image = img.get("src") if img else None
                 if image and image.startswith("/"):
                     image = self.base + image
-                card = div.find_parent("article") or div
                 text = card.get_text(" ", strip=True)
                 out.append({"source": self.source, "title": title, "image": image,
                             "current_bid": _price_from_text(text) or 0,
