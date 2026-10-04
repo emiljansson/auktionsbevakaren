@@ -165,9 +165,12 @@ export const LiveFeed = ({ onWatchAdded }) => {
             Auto-crawler
           </span>
           <span className="min-w-0 truncate text-xs text-slate-400" data-testid="crawler-status-text">
-            {status?.live_count ?? 0} objekt · uppdaterar 1 var {status?.interval_seconds || 10}:e sekund · {status?.last_action || "…"}
+            {status?.live_count ?? 0} objekt · uppdaterar 1 var {status?.interval_seconds || 10}:e sekund
           </span>
         </div>
+        <p className="mt-1 truncate text-xs text-slate-500" data-testid="crawler-last-action">
+          {status?.last_action || "…"}
+        </p>
         <div className="mt-2 flex flex-wrap gap-1">
           {Object.entries(sources).map(([name, s]) => {
             const chip = STATUS_CHIP[s.status] || STATUS_CHIP.planned;
