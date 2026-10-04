@@ -1,0 +1,128 @@
+{
+  "project_name": "Auktionsbevakning AI - Svenska Auktioner & Prisanalys",
+  "app_type": "dashboard",
+  "language": "sv-SE",
+  "theme_strategy": {
+    "default_mode": "dark",
+    "theme_toggle": true,
+    "rationale": "High-density auction intelligence and bid history analytics excel in dark mode (#0B0F17 base) with high-contrast indicator accents, providing command-center readability for live auctions."
+  },
+  "typography": {
+    "font_family_heading": "'Cabinet Grotesk', 'Outfit', sans-serif",
+    "font_family_body": "'Plus Jakarta Sans', 'Inter', sans-serif",
+    "font_family_mono": "'JetBrains Mono', 'Fira Code', monospace",
+    "forbidden_fonts": ["Space Grotesk"],
+    "scale": {
+      "h1": "text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight",
+      "h2": "text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight",
+      "h3": "text-lg sm:text-xl font-semibold",
+      "h4": "text-base font-medium",
+      "body": "text-sm text-slate-300 leading-relaxed",
+      "small_label": "text-xs font-mono uppercase tracking-wider text-slate-400"
+    }
+  },
+  "color_palette": {
+    "dark": {
+      "bg_main": "#0B0F19",
+      "bg_card": "#111827",
+      "bg_card_hover": "#1F2937",
+      "bg_surface_elevated": "#1E293B",
+      "border": "#1F2937",
+      "border_accent": "#374151",
+      "text_primary": "#F9FAFB",
+      "text_secondary": "#9CA3AF",
+      "text_muted": "#6B7280",
+      "accent_primary": "#F59E0B",
+      "accent_primary_hover": "#D97706",
+      "accent_ai": "#8B5CF6",
+      "accent_success": "#10B981",
+      "accent_danger": "#EF4444",
+      "accent_info": "#3B82F6"
+    },
+    "forbidden_colors": ["#1B93A4", "#7351B7"],
+    "auction_sources_badges": {
+      "PS Auction": "bg-amber-500/10 text-amber-400 border-amber-500/30",
+      "Klaravik": "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+      "Blinto": "bg-blue-500/10 text-blue-400 border-blue-500/30",
+      "Tovek": "bg-red-500/10 text-red-400 border-red-500/30",
+      "Netauktion": "bg-purple-500/10 text-purple-400 border-purple-500/30",
+      "Retrade": "bg-indigo-500/10 text-indigo-400 border-indigo-500/30",
+      "Budi": "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
+      "Fabeo": "bg-orange-500/10 text-orange-400 border-orange-500/30",
+      "Kronofogden": "bg-slate-500/10 text-slate-300 border-slate-500/30"
+    }
+  },
+  "layout_and_grid": {
+    "mode": "High Density Dashboard Grid",
+    "container_padding": "px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto",
+    "grid_structure": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6",
+    "bento_spans": {
+      "featured_auction": "col-span-1 md:col-span-2 row-span-2",
+      "standard_card": "col-span-1",
+      "bid_chart_widget": "col-span-1 md:col-span-2 lg:col-span-3",
+      "ai_valuation_panel": "col-span-1 md:col-span-2 lg:col-span-1"
+    }
+  },
+  "key_features_design_specs": {
+    "header_navigation": {
+      "type": "Glassmorphism Header",
+      "bg_class": "bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-50",
+      "branding": "Auktionsbevakning.se with live status beacon badge (Övervakar 9 källor)",
+      "quick_actions": "Lägg till bevakning (URL/Sök), Källfilter dropdown, Sortering"
+    },
+    "add_monitoring_modal": {
+      "title": "Bevaka ny auktion",
+      "inputs": ["Auktions-URL (klistra in länk från PS Auction, Klaravik, Blinto m.fl.)", "Eller sök nyckelord (t.ex. 'Grävmaskin Volvo EC220')", "Välj bevakningskategori"],
+      "action_cta": "Starta AI-Bevakning"
+    },
+    "auction_card_item": {
+      "elements": [
+        "Auktionskälla badge (med logotyp/ikon och källfärg)",
+        "Objektbild med countdown-timer badge i hörn ('Slutar om 02h 45m')",
+        "Titel och kategori",
+        "Nuvarande bud (SEK) + antal bud count badge",
+        "Totalpris inkl. moms & köparavgift (beräknat)",
+        "AI-Värderingsindikator ('Nypris est. 120 000 kr | Begagnat est. 65 000 kr')",
+        "Snabbknappar: Visa historik, Öppna originalauktion, Radera bevakning"
+      ]
+    },
+    "bid_history_graph": {
+      "chart_library": "Recharts AreaChart / LineChart",
+      "visuals": "Gradient fill under curve, custom active tooltip showing timestamp, bidder pseudonym, and step increment",
+      "metrics_bar": ["Högsta bud", "Budökning senaste 24h", "Estimerat slutpris", "Reservpris uppnått status"]
+    },
+    "ai_price_analysis": {
+      "components": [
+        "AI Värderingskort powered by Emergent Universal Key",
+        "Jämförbart nypris (Prisjakt.se matchningar med klickbara länkar)",
+        "Begagnatpris uppskattning med konfidensgrad (t.ex. 88% säkerhet)",
+        "Senaste avslutade auktioner på liknande modeller",
+        "Prisanalys insikt i klartext (svenska): 'Budet ligger 18% under marknadsvärde. Bra köpläge.'"
+      ]
+    },
+    "total_price_calculator": {
+      "formula": "Slutpris = Nuvarande bud + Moms (25% om ej angivet) + Köparavgift/Inropsavgift",
+      "interactive_breakdown": "Toggle för moms-visning (Exkl. moms / Inkl. moms) och specificerad köparavgift i SEK"
+    }
+  },
+  "image_urls": {
+    "machinery_1": "https://images.unsplash.com/photo-1603816885871-c122a9ff8d40?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHw0fHxpbmR1c3RyaWFsJTIwYXVjdGlvbiUyMG1hY2hpbmVyeSUyMGVxdWlwbWVudCUyMGNvbnN0cnVjdGlvbnxlbnwwfHx8fDE3OTExMjYwNzV8MA&ixlib=rb-4.1.0&q=85",
+    "machinery_2": "https://images.unsplash.com/photo-1603814929877-d5d927322656?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwxfHxpbmR1c3RyaWFsJTIwYXVjdGlvbiUyMG1hY2hpbmVyeSUyMGVxdWlwbWVudCUyMGNvbnN0cnVjdGlvbnxlbnwwfHx8fDE3OTExMjYwNzV8MA&ixlib=rb-4.1.0&q=85",
+    "machinery_3": "https://images.unsplash.com/photo-1603814744450-36f978490b11?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwyfHxpbmR1c3RyaWFsJTIwYXVjdGlvbiUyMG1hY2hpbmVyeSUyMGVxdWlwbWVudCUyMGNvbnN0cnVjdGlvbnxlbnwwfHx8fDE3OTExMjYwNzV8MA&ixlib=rb-4.1.0&q=85",
+    "analytics_bg": "https://images.unsplash.com/photo-1720962158789-9389a4f399da?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBhbmFseXRpYyUyMGRhc2hib2FyZCUyMGRhcmslMjB0ZWNobm9sb2d5JTIwaW50ZXJmYWNlfGVufDB8fHx8MTc5MTEyNjA3NXww&ixlib=rb-4.1.0&q=85"
+  },
+  "testing_and_accessibility": {
+    "data_testid_convention": "kebab-case, role-based, e.g. 'add-auction-button', 'auction-card-123', 'bid-history-chart', 'ai-price-estimate', 'source-filter-klaravik'",
+    "wcag_compliance": "AA rating, APCA contrast target > 60 for body text on dark cards",
+    "focus_states": "ring-2 ring-amber-500 ring-offset-2 ring-offset-slate-900"
+  },
+  "instructions_to_main_agent": [
+    "Build the dashboard using React JS and Tailwind CSS with components from src/components/ui.",
+    "Ensure all user text is in Swedish (sv-SE).",
+    "Support monitoring for all 9 sources: PS Auction, Klaravik, Blinto, Tovek, Netauktion, Retrade, Budi, Fabeo, Kronofogden.",
+    "Implement data structures containing: source, id, title, current_bid, bid_count, currency, vat, buyer_fee, total_now, ends_at, url.",
+    "Include real web-scraping / backend endpoints with fallback realistic mock data when needed.",
+    "Integrate the Emergent Universal Key AI price evaluation agent for comparing new price (Prisjakt/Google) and estimated used price.",
+    "Ensure every interactive element has a data-testid attribute for automated testing."
+  ]
+}
