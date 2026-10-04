@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import "@/App.css";
 import { AnimatePresence, motion } from "framer-motion";
-import { Gavel, Plus, Radar, Sparkles, Wallet, Layers, TrendingDown, Loader2 } from "lucide-react";
+import { Gavel, Plus, Radar, Sparkles, Wallet, Layers, TrendingDown, Loader2, Bell, BellRing } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -11,6 +11,23 @@ import AuctionDetail from "@/components/AuctionDetail";
 import LiveFeed from "@/components/LiveFeed";
 import { api } from "@/lib/api";
 import { SOURCES, formatSEK } from "@/lib/sources";
+import { PushProvider, usePush } from "@/context/push";
+
+const NotifButton = () => {
+  const push = usePush();
+  const on = push?.canWatch;
+  return (
+    <button
+      onClick={() => push?.openGate()}
+      data-testid="notif-button"
+      title={on ? "Notiser aktiva" : "Aktivera bevakning & notiser"}
+      className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl border px-2.5 text-sm font-semibold transition-colors ${on ? "border-emerald-700/50 bg-emerald-500/10 text-emerald-400" : "border-slate-800 bg-[#111827] text-slate-300 hover:text-amber-400"}`}
+    >
+      {on ? <BellRing className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+      <span className="hidden sm:inline">{on ? "Notiser på" : "Notiser"}</span>
+    </button>
+  );
+};
 
 const StatCard = ({ icon: Icon, label, value, color }) => (
   <div className="flex items-center gap-3 rounded-xl border border-slate-800 bg-[#111827] p-4">
@@ -137,7 +154,9 @@ function App() {
               </p>
             </div>
           </div>
-          <div className="inline-flex shrink-0 rounded-xl border border-slate-800 bg-[#111827] p-1" data-testid="view-toggle">
+          <div className="flex shrink-0 items-center gap-2">
+            <NotifButton />
+            <div className="inline-flex rounded-xl border border-slate-800 bg-[#111827] p-1" data-testid="view-toggle">
             <button
               onClick={() => setView("live")}
               data-testid="view-live"
@@ -152,6 +171,7 @@ function App() {
             >
               <Layers className="h-4 w-4" /> <span className="hidden sm:inline">Mina bevakningar</span><span className="sm:hidden">Bevakning</span> {stats.total > 0 && <span className="rounded-full bg-slate-900/40 px-1.5 text-xs">{stats.total}</span>}
             </button>
+            </div>
           </div>
         </div>
       </header>
@@ -226,4 +246,10 @@ function App() {
   );
 }
 
-export default App;
+export default function AppWithProviders() {
+  return (
+    <PushProvider>
+      <App />
+    </PushProvider>
+  );
+}

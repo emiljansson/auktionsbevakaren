@@ -85,6 +85,17 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
             </Button>
           </div>
           <div className="h-56 w-full">
+            {chartData.length < 2 ? (
+              <div className="flex h-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-800 bg-slate-900/40 px-6 text-center" data-testid="bid-history-empty">
+                <Gavel className="mb-2 h-6 w-6 text-slate-600" />
+                <p className="text-sm font-medium text-slate-300">
+                  {auction.bid_count > 0 ? `${auction.bid_count} bud hittills på auktionssajten` : "Inga bud ännu"}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Budhistoriken börjar spåras när du bevakar objektet – grafen fylls på automatiskt när nya bud läggs.
+                </p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                 <defs>
@@ -100,6 +111,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                 <Area type="monotone" dataKey="bid" stroke="#F59E0B" strokeWidth={2} fill="url(#bidFill)" />
               </AreaChart>
             </ResponsiveContainer>
+            )}
           </div>
           <div className="mt-3 grid grid-cols-3 gap-3">
             <Metric label="Högsta bud" value={formatSEK(highest)} accent="text-amber-400" />

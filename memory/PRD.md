@@ -115,6 +115,19 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - **Mina bevakningar** (`GET /api/auctions`): berikas alltid med färskaste avgift/bud från live-datan; okända avgifter lärs in on-demand (en gång per objekt). `POST /live/watch` lär in avgiften direkt vid bevakning. Verifierat: Klaravik/Tovek/Fabeo/Netauktion visar nu "Att betala (ca)" med exakt slagavgift.
 - Fixat mobil-overflow i sticky header (min-w-0 + truncate på titeln).
 
+## PWA + per-enhet-push via CommHub – uppdaterat 2026-06
+- **Push-notiser (CommHub/FCM)**: nycklar i `backend/.env` (`COMMHUB_API_KEY`, `COMMHUB_APP_ID`, `COMMHUB_BASE_URL`). Nytt `backend/commhub.py` (get_web_config, register_token, send_to_token). Auth: `X-API-Key`.
+- **Appen är nu en PWA**: `public/manifest.json`, ikoner (`icon-192/512.png`), `firebase-messaging-sw.js` (bakgrundspush), meta i `index.html`.
+- **Hård spärr för Bevaka**: Bevaka-knappen är låst tills appen körs i standalone (installerad) OCH pushnotiser är aktiverade. Gating-UI i `src/context/push.jsx` (modal med 2 steg) + `src/lib/push.js`. "Notiser"-knapp i headern.
+- **Per-enhet-identitet (inget inlogg)**: `X-Device-Id`-header (localStorage-uuid) på alla anrop via axios-interceptor i `src/lib/api.js`. `devices`-collection lagrar {device_id, token}.
+- **Bevakningar är personliga per enhet**: `GET /auctions`, `POST /live/watch`, `DELETE /auctions`, `GET /stats` är scoped på device_id. Watch kräver registrerad enhet (annars 403).
+- **Migrering**: första registrerade enheten ärver alla gamla delade bevakningar (engångs).
+- **Notifierare**: `_ending_notifier` i server.py pushar till rätt enhets token när en bevakad auktion har < 60 min kvar (en gång per objekt, `notified_ending`).
+- VERIFIERAT: backend-flöde (registrera→bevaka→lista→isolering→migrering) via curl; PWA-gating + mobil via skärmdump. EJ verifierbart i preview: faktisk FCM-leverans till en riktig installerad enhet (kräver riktig enhet/token).
+
+## Budhistorik-bugg fixad (2026-06)
+- Bevakade objekt visade simulerad 3-punktsgraf + fel budantal. Nu: riktigt budantal från live-datan (t.ex. 37) och riktig spårad `price_history`; när < 2 punkter visas en förklarande not istället för en vilseledande graf. `_bid_history`/`_real_bid_count` i server.py; `AuctionDetail.jsx` graf-fallback.
+
 ## Nästa steg (kvar)
 - AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.

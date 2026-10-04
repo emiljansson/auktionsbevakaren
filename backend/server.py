@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -18,6 +18,8 @@ load_dotenv(ROOT_DIR / '.env')
 import scraper
 import valuation
 import tradera
+import commhub
+from fastapi import Header
 from crawler import Crawler
 
 mongo_url = os.environ['MONGO_URL']
@@ -71,6 +73,76 @@ def _clean(doc: dict) -> dict:
     return doc
 
 
+def _bid_history(doc: dict) -> list:
+    """Real observed price points, mapped to the chart's {timestamp, bid} shape."""
+    return [{"timestamp": h.get("t"), "bid": h.get("bid")}
+            for h in (doc.get("price_history") or []) if h.get("bid") is not None]
+
+
+def _real_bid_count(doc: dict) -> int:
+    """The site's actual bid count when known, else the number of observed points."""
+    bc = doc.get("bid_count")
+    if bc:
+        return bc
+    return len(doc.get("price_history") or []) or (1 if doc.get("current_bid") else 0)
+
+
+class PushRegister(BaseModel):
+    token: str
+    platform: Optional[str] = "web"
+
+
+async def require_device(x_device_id: Optional[str] = Header(None)) -> str:
+    if not x_device_id:
+        raise HTTPException(status_code=400, detail="Enhets-ID saknas.")
+    return x_device_id
+
+
+# ---------- Push notifications (per-device, no login) ----------
+@api_router.get("/push/config")
+async def push_config():
+    if not commhub.enabled():
+        raise HTTPException(status_code=503, detail="Push är inte konfigurerat.")
+    try:
+        cfg = await commhub.get_web_config()
+    except Exception:
+        logger.exception("push config")
+        raise HTTPException(status_code=502, detail="Kunde inte hämta push-konfiguration.")
+    return {"config": cfg.get("config"), "vapidKey": cfg.get("vapidKey"), "app_id": commhub.APP_ID}
+
+
+@api_router.post("/push/register")
+async def push_register(payload: PushRegister, device_id: str = Depends(require_device)):
+    if not commhub.enabled():
+        raise HTTPException(status_code=503, detail="Push är inte konfigurerat.")
+    first_device = await db.devices.count_documents({}) == 0
+    try:
+        await commhub.register_token(payload.token, device_id, payload.platform or "web")
+    except Exception:
+        logger.exception("push register")
+        raise HTTPException(status_code=502, detail="Kunde inte registrera för notiser.")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.devices.update_one(
+        {"device_id": device_id},
+        {"$set": {"token": payload.token, "platform": payload.platform or "web", "updated_at": now},
+         "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    # Migrate legacy shared watches to the very first registered device.
+    if first_device:
+        await db.auctions.update_many(
+            {"$or": [{"device_id": {"$exists": False}}, {"device_id": None}]},
+            {"$set": {"device_id": device_id}},
+        )
+    return {"ok": True}
+
+
+@api_router.get("/push/status")
+async def push_status(x_device_id: Optional[str] = Header(None)):
+    dev = await db.devices.find_one({"device_id": x_device_id}) if x_device_id else None
+    return {"registered": bool(dev and dev.get("token"))}
+
+
 # ---------- Routes ----------
 @api_router.get("/")
 async def root():
@@ -91,8 +163,10 @@ async def scrape_preview(payload: WatchCreate):
 
 
 @api_router.get("/auctions", response_model=List[Auction])
-async def list_auctions(source: Optional[str] = None):
-    query = {}
+async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str] = Header(None)):
+    if not x_device_id:
+        return []
+    query = {"device_id": x_device_id}
     if source and source != "Alla":
         query["source"] = source
     docs = await db.auctions.find(query).sort("created_at", -1).to_list(500)
@@ -120,9 +194,11 @@ async def list_auctions(source: Optional[str] = None):
         if not lv:
             continue
         for k in ("current_bid", "starting_price", "vat", "buyer_fee",
-                  "fee_known", "fee_note", "total_now", "ends_at"):
+                  "fee_known", "fee_note", "total_now", "ends_at", "bid_count"):
             if lv.get(k) is not None:
                 d[k] = lv[k]
+        d["bid_count"] = _real_bid_count(lv)
+        d["bid_history"] = _bid_history(lv)
     return [Auction(**_clean(d)) for d in docs]
 
 
@@ -216,16 +292,18 @@ async def refresh_auction(auction_id: str):
 
 
 @api_router.delete("/auctions/{auction_id}")
-async def delete_auction(auction_id: str):
-    res = await db.auctions.delete_one({"id": auction_id})
+async def delete_auction(auction_id: str, device_id: str = Depends(require_device)):
+    res = await db.auctions.delete_one({"id": auction_id, "device_id": device_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     return {"ok": True}
 
 
 @api_router.get("/stats")
-async def stats():
-    docs = await db.auctions.find({}, {"_id": 0}).to_list(500)
+async def stats(x_device_id: Optional[str] = Header(None)):
+    if not x_device_id:
+        return {"total": 0, "total_value": 0, "sources_tracked": 0, "good_deals": 0}
+    docs = await db.auctions.find({"device_id": x_device_id}, {"_id": 0}).to_list(500)
     total = len(docs)
     total_value = sum(d.get("total_now", 0) for d in docs)
     by_source = {}
@@ -299,7 +377,10 @@ async def live_sync():
 
 
 @api_router.post("/live/watch", response_model=Auction)
-async def watch_live(payload: WatchCreate):
+async def watch_live(payload: WatchCreate, device_id: str = Depends(require_device)):
+    dev = await db.devices.find_one({"device_id": device_id})
+    if not (dev and dev.get("token")):
+        raise HTTPException(status_code=403, detail="Aktivera pushnotiser för att kunna bevaka.")
     doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Live-auktion hittades inte.")
@@ -311,18 +392,18 @@ async def watch_live(payload: WatchCreate):
             doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0}) or doc
         except Exception:
             logger.exception("watch learn_fee failed")
-    history = scraper.generate_bid_history(doc["current_bid"], max(len(doc.get("price_history", [])), 3))
+    history = _bid_history(doc)
     auction = Auction(
         source=doc["source"], title=doc["title"], image=doc.get("image"),
         category=payload.category or "Övrigt", current_bid=doc["current_bid"],
         starting_price=doc.get("starting_price"),
-        bid_count=max(len(doc.get("price_history", [])), 1),
+        bid_count=_real_bid_count(doc),
         vat=doc.get("vat", 25), buyer_fee=doc.get("buyer_fee"),
         fee_known=doc.get("fee_known", True), fee_note=doc.get("fee_note"),
         total_now=doc.get("total_now", doc["current_bid"]),
         url=doc["url"], scraped=True, bid_history=history,
     )
-    await db.auctions.insert_one(auction.model_dump())
+    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id})
     return auction
 
 
@@ -339,7 +420,48 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await db.live_auctions.create_index("url", unique=True)
+    await db.auctions.create_index("device_id")
+    await db.devices.create_index("device_id", unique=True)
     crawler.start()
+    asyncio.create_task(_ending_notifier())
+
+
+async def _ending_notifier():
+    """Push a notification to the watching device when one of its watched
+    auctions is about to end (within the next hour), once per auction."""
+    await asyncio.sleep(25)
+    while True:
+        try:
+            if commhub.enabled():
+                now = datetime.now(timezone.utc)
+                soon = (now + timedelta(minutes=60)).isoformat()
+                cursor = db.auctions.find({
+                    "ends_at": {"$gt": now.isoformat(), "$lte": soon},
+                    "notified_ending": {"$ne": True},
+                    "device_id": {"$ne": None},
+                })
+                async for d in cursor:
+                    dev = await db.devices.find_one({"device_id": d.get("device_id")})
+                    token = (dev or {}).get("token")
+                    if token:
+                        try:
+                            end = datetime.fromisoformat(d["ends_at"])
+                            mins = max(1, int((end - now).total_seconds() // 60))
+                        except Exception:
+                            mins = 60
+                        try:
+                            await commhub.send_to_token(
+                                token,
+                                title="⏰ Auktion avslutas snart",
+                                body=f"{d['title'][:70]} slutar om {mins} min",
+                                data={"url": d.get("url") or ""},
+                            )
+                        except Exception:
+                            logger.exception("ending push failed")
+                    await db.auctions.update_one({"id": d["id"]}, {"$set": {"notified_ending": True}})
+        except Exception:
+            logger.exception("ending notifier loop")
+        await asyncio.sleep(60)
 
 
 @app.on_event("shutdown")
