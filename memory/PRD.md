@@ -73,6 +73,7 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
   - `refresh_item` = no-op (hela katalogen uppdateras per discovery-pass) för att spara ScrapingBee-krediter (1 anrop/pass istället för 1587).
 - **9 aktiva källor:** Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden, Tovek, PS Auction, Blinto.
 - **Netauktion/Tovek-bud verifierat**: bud synkas korrekt (Tovek-traktor visar 47 000 kr; ~86/130 Netauktion och ~85/164 Tovek har bud; 0-bud-objekt visar utropspris eller "Inga bud ännu"). Netauktion fyller bud gradvis via refresh (1 objekt/10s).
+- **Netauktion-bud fångas nu direkt vid discovery** (2026-06): listningskortet innehåller `.top-bid-<id>` / "Nuvarande bud X SEK", så budet läses direkt istället för att vänta på den långsamma per-objekt-refreshen. ~95/130 objekt visar bud omedelbart (t.ex. "Gamingskärm GTSA Infinity" = 300 kr). refresh_item behålls som färskhets-fallback.
 - Testat via curl + screenshot (frontend visar Blinto-kort med rätt bilder/bud/nedräkning).
 
 ## Nästa steg (kvar)

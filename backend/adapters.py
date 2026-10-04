@@ -285,11 +285,18 @@ class NetauktionAdapter:
                 if image and image.startswith("/"):
                     image = self.base + image
                 text = card.get_text(" ", strip=True)
-                # The listing card only shows "Marknadsvärde" (an estimate), not the
-                # current bid. Leave current_bid=0 here; refresh_item reads the real
-                # "Nuvarande bud" from the product page. Capture end time from the card.
+                # The listing card carries the real current bid ("Nuvarande bud X SEK",
+                # also in .top-bid-<id>). Parse it directly so bids show immediately at
+                # discovery instead of waiting for the slow per-item refresh.
+                bid = None
+                tb = card.select_one('[class*="top-bid-"]:not([class*="avatar"])')
+                if tb:
+                    bid = _to_int(re.sub(r"[^\d]", "", tb.get_text()))
+                if not bid:
+                    m = re.search(r"Nuvarande bud\s*([\d\s\u00a0\.]+)\s*(?:SEK|kr)", text, re.I)
+                    bid = _to_int(m.group(1)) if m else None
                 out.append({"source": self.source, "title": title, "image": image,
-                            "current_bid": 0,
+                            "current_bid": bid or 0,
                             "ends_at": _netauktion_ends(text),
                             "url": self.base + u if u.startswith("/") else u})
             if len(out) >= 300:
