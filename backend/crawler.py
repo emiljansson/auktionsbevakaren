@@ -98,9 +98,33 @@ class Crawler:
         while self.running:
             self.tick_count += 1
             self.last_tick = _iso()
+            if self.tick_count % 30 == 1:
+                await self._cleanup()
             # Each site advances by one unit of work per tick (in parallel).
             await asyncio.gather(*[self._step(st) for st in self.states], return_exceptions=True)
             await asyncio.sleep(INTERVAL)
+
+    async def _cleanup(self):
+        """Remove live auctions whose end time has passed, so only ongoing ones show."""
+        now = _now()
+        docs = await self.db.live_auctions.find(
+            {"ends_at": {"$ne": None}}, {"url": 1, "ends_at": 1}
+        ).to_list(5000)
+        dead = []
+        for d in docs:
+            try:
+                end = datetime.fromisoformat(str(d["ends_at"]).replace("Z", "+00:00"))
+                if end.tzinfo is None:
+                    end = end.replace(tzinfo=timezone.utc)
+                if end < now:
+                    dead.append(d["url"])
+            except Exception:
+                continue
+        if dead:
+            await self.db.live_auctions.delete_many({"url": {"$in": dead}})
+            for st in self.states:
+                st.queue = [u for u in st.queue if u not in set(dead)]
+            logger.info("Cleanup removed %s ended auctions", len(dead))
 
     async def _step(self, st):
         try:

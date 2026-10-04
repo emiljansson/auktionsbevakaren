@@ -46,7 +46,15 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - Kräver proxy/nyckel: PS Auction (renderande skrap-tjänst), Blinto (premium anti-bot).
 - Frontend live-kort visar nedräkning + antal bud; källstatus-chips speglar ovan.
 
+## Sex aktiva källor + rensning – uppdaterat 2026-06
+- **Aktiva adaptrar (ingen proxy): Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden.** ~470 objekt hämtas automatiskt.
+  - Retrade: per-objekt-länkar (`/sv/auction/<id>`) ur SSR-HTML + ItemList (pris/sluttid).
+  - Netauktion: itererar auktionssidor, parsar objektkort (`open_product_card_div`), per-objekt-länkar + pris/bud.
+  - Kronofogden: listar aktuella exekutiva försäljningar (titel/datum/länk); budgivning sker externt (auction2000.se) så inget bud visas ("Exekutiv försäljning").
+- **Rensning**: crawler tar bort live-objekt vars `ends_at` passerat (var ~5 min), så bara pågående visas.
+- Kvar: Tovek (kräver inloggning), PS Auction (renderande nyckel), Blinto (premium anti-bot).
+
 ## Nästa steg
-- Push vid stundande avslut via externt system (användaren fixar nyckel senare)
-- Adaptrar för Retrade/Netauktion/Kronofogden/Tovek
-- Rensa avslutade/inaktuella live-objekt (Budi roterar startsidan → DB växer)
+- Push vid stundande avslut via externt system (användaren fixar nyckel)
+- Tovek-adapter (kräver inloggning), PS Auction via skrap-nyckel
+- Prisfilter/sortering i live-flödet

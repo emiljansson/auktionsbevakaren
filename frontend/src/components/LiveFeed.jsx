@@ -40,8 +40,17 @@ const LiveCard = ({ a, onWatch, watching }) => {
     <div className="flex flex-1 flex-col gap-2 p-3">
       <h4 className="line-clamp-2 text-sm font-semibold text-slate-100" title={a.title}>{a.title}</h4>
       <div className="mt-auto">
-        <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Aktuellt bud{a.bid_count ? ` · ${a.bid_count} bud` : ""}</p>
-        <p className="font-heading text-lg font-bold text-amber-400">{formatSEK(a.current_bid)}</p>
+        {a.current_bid > 0 ? (
+          <>
+            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Aktuellt bud{a.bid_count ? ` · ${a.bid_count} bud` : ""}</p>
+            <p className="font-heading text-lg font-bold text-amber-400">{formatSEK(a.current_bid)}</p>
+          </>
+        ) : (
+          <>
+            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Exekutiv försäljning</p>
+            <p className="font-heading text-sm font-semibold text-slate-300">Se auktion för detaljer</p>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-2 pt-1">
         <Button size="sm" onClick={() => onWatch(a)} disabled={watching === a.url}

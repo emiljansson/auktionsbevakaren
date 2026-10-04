@@ -180,17 +180,127 @@ class FabeoAdapter:
         return {"current_bid": price, "ends_at": valid} if price else None
 
 
+class RetradeAdapter:
+    source = "Retrade"
+    listing_url = "https://www.retrade.eu/sv"
+
+    async def discover(self):
+        soup = BeautifulSoup(await _get(self.listing_url), "lxml")
+        cards = soup.select('a[href*="/auction/"]')
+        il = _ld_type(soup, "ItemList")
+        items = (il or {}).get("itemListElement", [])
+        out = []
+        for i, a in enumerate(cards):
+            href = a.get("href", "")
+            if not re.search(r"/auction/\d+", href):
+                continue
+            url = "https://www.retrade.eu" + href if href.startswith("/") else href
+            img = a.find("img")
+            title = (img.get("alt") if img else None) or "Retrade-objekt"
+            image = img.get("src") if img else None
+            price, ends = 0, None
+            if i < len(items):
+                it = items[i].get("item", {}) if isinstance(items[i], dict) else {}
+                p, ends = _offer_price(it)
+                price = p or 0
+                if it.get("name"):
+                    title = it["name"]
+                if it.get("image"):
+                    image = it["image"]
+            out.append({"source": self.source, "title": title, "image": image,
+                        "current_bid": price, "ends_at": ends, "url": url})
+        return out
+
+    async def refresh_item(self, url):
+        soup = BeautifulSoup(await _get(url), "lxml")
+        prod = _ld_type(soup, "Product")
+        if prod:
+            price, valid = _offer_price(prod)
+            if price:
+                return {"current_bid": price, "ends_at": valid}
+        price = _price_from_text(soup.get_text(" ", strip=True))
+        return {"current_bid": price} if price else None
+
+
+class NetauktionAdapter:
+    source = "Netauktion"
+    base = "https://www.netauktion.se"
+
+    async def discover(self):
+        soup = BeautifulSoup(await _get(self.base + "/auktion/display/"), "lxml")
+        slugs = [a["href"] for a in soup.find_all("a", href=True)
+                 if re.match(r"^/auktion/[^/]+$", a["href"])]
+        slugs = list(dict.fromkeys(slugs))[:20]
+        out = []
+        for slug in slugs:
+            try:
+                page = await _get(self.base + slug)
+            except Exception:
+                continue
+            s = BeautifulSoup(page, "lxml")
+            for div in s.select(".open_product_card_div[url]"):
+                u = div.get("url")
+                if not u:
+                    continue
+                img = div.find("img")
+                title = ((img.get("alt") or img.get("title")) if img else None) or "Objekt"
+                image = img.get("src") if img else None
+                if image and image.startswith("/"):
+                    image = self.base + image
+                card = div.find_parent("article") or div
+                text = card.get_text(" ", strip=True)
+                out.append({"source": self.source, "title": title, "image": image,
+                            "current_bid": _price_from_text(text) or 0,
+                            "bid_count": _bids_from_text(text),
+                            "url": self.base + u if u.startswith("/") else u})
+            if len(out) >= 300:
+                break
+        return out
+
+    async def refresh_item(self, url):
+        soup = BeautifulSoup(await _get(url), "lxml")
+        text = soup.get_text(" ", strip=True)
+        price = _price_from_text(text)
+        return {"current_bid": price} if price else None
+
+
+class KronofogdenAdapter:
+    """Kronofogden annonserar exekutiva försäljningar (mest fastigheter); själva
+    nätbudgivningen sker på extern plattform. Vi listar aktuella försäljningar
+    som poster (titel, datum, länk) utan bud."""
+    source = "Kronofogden"
+    base = "https://auktionstorget.kronofogden.se"
+
+    async def discover(self):
+        soup = BeautifulSoup(await _get(self.base + "/Aktuellaforsaljningar.html"), "lxml")
+        out, seen = [], set()
+        for a in soup.find_all("a", href=True):
+            txt = a.get_text(" ", strip=True)
+            if re.search(r"/\d+\.html", a["href"]) and re.search(r"\d{4}-\d{2}-\d{2}", txt):
+                url = a["href"] if a["href"].startswith("http") else self.base + "/" + a["href"].lstrip("/")
+                if url in seen:
+                    continue
+                seen.add(url)
+                out.append({"source": self.source, "title": re.sub(r"\s+", " ", txt), "image": None,
+                            "current_bid": 0, "url": url})
+        return out
+
+    async def refresh_item(self, url):
+        return None
+
+
 # Active adapters (reliably scrapable server-side, with per-item links)
-ENABLED = [KlaravikAdapter(), BudiAdapter(), FabeoAdapter()]
+ENABLED = [KlaravikAdapter(), BudiAdapter(), FabeoAdapter(),
+           RetradeAdapter(), NetauktionAdapter(), KronofogdenAdapter()]
 
 # Reported to the UI so users understand coverage honestly
 SOURCE_STATUS = {
     "Klaravik": {"status": "active", "note": "Automatisk bevakning aktiv."},
     "Budi": {"status": "active", "note": "Automatisk bevakning aktiv (inkl. sluttid)."},
     "Fabeo": {"status": "active", "note": "Automatisk bevakning aktiv."},
-    "Retrade": {"status": "planned", "note": "Nåbar men SPA saknar direktlänkar per objekt – kräver extra arbete."},
-    "Netauktion": {"status": "planned", "note": "Nåbar men listning saknar strukturerade priser per objekt – adapter ej byggd."},
-    "Kronofogden": {"status": "planned", "note": "ASP.NET-söksida, mest fastigheter – adapter ej byggd."},
+    "Retrade": {"status": "active", "note": "Automatisk bevakning aktiv (per-objekt-länkar)."},
+    "Netauktion": {"status": "active", "note": "Automatisk bevakning aktiv (objekt per auktion)."},
+    "Kronofogden": {"status": "active", "note": "Listar aktuella försäljningar (budgivning sker externt)."},
     "Tovek": {"status": "planned", "note": "Kräver inloggning för budvisning – adapter ej byggd."},
     "PS Auction": {"status": "needs_key", "note": "Nåbar endast via renderande skrap-tjänst (Cloudflare). Lägg till SCRAPER_API_KEY för att aktivera."},
     "Blinto": {"status": "blocked", "note": "Anti-bot blockerar även renderande verktyg. Kräver premium-proxy."},
