@@ -119,6 +119,22 @@ class KlaravikAdapter:
     source = "Klaravik"
     listing_url = "https://www.klaravik.se/auktion/"
 
+    @staticmethod
+    def _product_data(html):
+        """Klaravik embeds a product-data JSON on each item page with the exact
+        inropsavgift (auctionFee, EXCL VAT), current bid and VAT%."""
+        i = html.find("product-data='")
+        if i < 0:
+            return None
+        start = i + len("product-data='")
+        end = html.find("'", start)
+        if end < 0:
+            return None
+        try:
+            return json.loads(html[start:end])
+        except Exception:
+            return None
+
     async def discover(self):
         soup = BeautifulSoup(await _get(self.listing_url), "lxml")
         il = _ld_type(soup, "ItemList")
@@ -135,7 +151,27 @@ class KlaravikAdapter:
         return out
 
     async def refresh_item(self, url):
-        prod = _ld_type(BeautifulSoup(await _get(url), "lxml"), "Product")
+        html = await _get(url)
+        pd = self._product_data(html)
+        if pd:
+            res = {}
+            bid = _to_int((pd.get("bidBox") or {}).get("bid"))
+            if bid:
+                res["current_bid"] = bid
+            if pd.get("auctionFee") is not None:
+                res["fee_excl"] = _to_int(pd["auctionFee"])
+                res["fee_vat"] = 25
+            if pd.get("vat") is not None:
+                res["vat"] = pd["vat"]
+            unix = (pd.get("closeBox") or {}).get("auctionEndTimeUnix")
+            if unix:
+                try:
+                    res["ends_at"] = datetime.fromtimestamp(int(unix), tz=timezone.utc).isoformat()
+                except Exception:
+                    pass
+            if res:
+                return res
+        prod = _ld_type(BeautifulSoup(html, "lxml"), "Product")
         if not prod:
             return None
         price, valid = _offer_price(prod)
@@ -212,13 +248,25 @@ class FabeoAdapter:
 
     async def refresh_item(self, url):
         soup = BeautifulSoup(await _get(url), "lxml")
+        text = soup.get_text(" ", strip=True)
         prod = _ld_type(soup, "Product")
         price, valid = (None, None)
         if prod:
             price, valid = _offer_price(prod)
         if not price:
-            price = _price_from_text(soup.get_text(" ", strip=True))
-        return {"current_bid": price, "ends_at": valid} if price else None
+            price = _price_from_text(text)
+        res = {}
+        if price:
+            res["current_bid"] = price
+        if valid:
+            res["ends_at"] = valid
+        # Fabeo states the exact per-object slagavgift publicly, e.g.
+        # "En slagavgift på 25 000 kr (exkl. moms) tillkommer."
+        m = re.search(r"slagavgift\s*p[åa]\s*([\d\s\u00a0\.]+)\s*kr\s*\(exkl", text, re.I)
+        if m:
+            res["fee_excl"] = _to_int(m.group(1))
+            res["fee_vat"] = 25
+        return res or None
 
 
 class RetradeAdapter:
@@ -313,18 +361,33 @@ class NetauktionAdapter:
         return out
 
     async def refresh_item(self, url):
-        soup = BeautifulSoup(await _get(url), "lxml")
+        html = await _get(url)
+        soup = BeautifulSoup(html, "lxml")
+        full = soup.get_text(" ", strip=True)
         bid = None
         el = soup.select_one(".auction-bid-box-body-price")
         if el:
             bid = _to_int(re.sub(r"[^\d]", "", el.get_text()))
         if not bid:
-            m = re.search(r"Nuvarande bud\s*([\d\s\u00a0\.]+)\s*(?:SEK|kr)", soup.get_text(" ", strip=True), re.I)
+            m = re.search(r"Nuvarande bud\s*([\d\s\u00a0\.]+)\s*(?:SEK|kr)", full, re.I)
             bid = _to_int(m.group(1)) if m else None
-        ends = _netauktion_ends(soup.get_text(" ", strip=True))
+        ends = _netauktion_ends(full)
+        res = {}
         if bid:
-            return {"current_bid": bid, "ends_at": ends}
-        return {"ends_at": ends} if ends else None
+            res["current_bid"] = bid
+        if ends:
+            res["ends_at"] = ends
+        # Netauktion publishes the exact slagavgift rule per object, e.g.
+        # "Slagavgift 12% exkl. moms tillkommer budet (min: 100 kr - max: 50 000 kr exkl. moms)."
+        m = re.search(
+            r"Slagavgift\s*(\d+)\s*%\s*exkl.*?min:\s*([\d\s\u00a0\.]+)\s*kr\s*-\s*max:\s*([\d\s\u00a0\.]+)\s*kr",
+            html, re.I | re.S)
+        if m:
+            res["fee_pct"] = int(m.group(1))
+            res["fee_min"] = _to_int(m.group(2))
+            res["fee_max"] = _to_int(m.group(3))
+            res["fee_vat"] = 25
+        return res or None
 
 
 class KronofogdenAdapter:
@@ -441,6 +504,10 @@ class TovekAdapter:
                         "title": (it.get("itemTitle") or "Objekt").strip(),
                         "image": imgs[0] if imgs else None,
                         "min": it.get("itemMinBid") or 0,
+                        # Tovek exposes the exact per-object slagavgift (EXCL VAT,
+                        # +25% moms) and the bid VAT% publicly on every rop.
+                        "fee_excl": it.get("itemFeeValue"),
+                        "vat": it.get("itemVatValue"),
                         "ends_item": _tovek_ends(it.get("itemEndTime") or it.get("itemLastEndDate")),
                     })
         bids = await self._bids_map([r["iid"] for r in raw])
@@ -452,6 +519,7 @@ class TovekAdapter:
                 "source": self.source, "title": r["title"], "image": r["image"],
                 "current_bid": bid,
                 "starting_price": (r["min"] or None) if not bid else None,
+                "fee_excl": r["fee_excl"], "vat": r["vat"], "fee_vat": 25,
                 "ends_at": b.get("ends") or r["ends_item"],
                 "url": f"https://tovek.se/auktion/rop/{_slugify(r['title'])}/{r['iid']}",
             })

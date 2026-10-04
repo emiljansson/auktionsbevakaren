@@ -96,6 +96,29 @@ async def list_auctions(source: Optional[str] = None):
     if source and source != "Alla":
         query["source"] = source
     docs = await db.auctions.find(query).sort("created_at", -1).to_list(500)
+    # Enrich each watched item with the latest fee/bid from the live feed so
+    # Mina bevakningar always shows the current slagavgift, not a stale snapshot.
+    urls = [d.get("url") for d in docs if d.get("url")]
+    live_map = {}
+    if urls:
+        async for lv in db.live_auctions.find({"url": {"$in": urls}}, {"_id": 0}):
+            live_map[lv["url"]] = lv
+    # One-time per item: if the live doc hasn't learned the exact fee yet, learn
+    # it now (self-limiting – stops once fee_known is True).
+    unknown = [u for u, lv in live_map.items() if not lv.get("fee_known")][:10]
+    if unknown:
+        await asyncio.gather(*[crawler.refresh_url(u) for u in unknown],
+                             return_exceptions=True)
+        async for lv in db.live_auctions.find({"url": {"$in": unknown}}, {"_id": 0}):
+            live_map[lv["url"]] = lv
+    for d in docs:
+        lv = live_map.get(d.get("url"))
+        if not lv:
+            continue
+        for k in ("current_bid", "starting_price", "vat", "buyer_fee",
+                  "fee_known", "fee_note", "total_now", "ends_at"):
+            if lv.get(k) is not None:
+                d[k] = lv[k]
     return [Auction(**_clean(d)) for d in docs]
 
 
@@ -276,6 +299,14 @@ async def watch_live(payload: WatchCreate):
     doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Live-auktion hittades inte.")
+    # Learn the exact slagavgift right away if it isn't known yet, so the watched
+    # item shows the fee immediately (Klaravik/Fabeo/Netauktion learn it per item).
+    if not doc.get("fee_known"):
+        try:
+            await crawler.refresh_url(payload.url)
+            doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0}) or doc
+        except Exception:
+            logger.exception("watch refresh_url failed")
     history = scraper.generate_bid_history(doc["current_bid"], max(len(doc.get("price_history", [])), 3))
     auction = Auction(
         source=doc["source"], title=doc["title"], image=doc.get("image"),

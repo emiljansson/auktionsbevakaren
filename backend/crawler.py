@@ -22,42 +22,70 @@ INTERVAL = int(os.environ.get("CRAWL_INTERVAL_SECONDS", "10"))
 REST_SECONDS = int(os.environ.get("CRAWL_REST_SECONDS", str(4 * 3600)))
 
 # Buyer premium (slagavgift/inropsavgift) + VAT per source. Most Swedish B2B
-# auction sites quote bids EXCL. VAT and add 25% VAT on both bid and fee. The
-# exact buyer fee usually varies per object (shown on the auction page / after
-# login), so we only apply a concrete % where it is publicly documented and
-# otherwise flag it as "tillkommer". Totals are estimates ("ca").
+# auction sites quote bids EXCL. VAT and add 25% VAT on both bid and fee.
+# Where a site publicly exposes the exact per-object fee we dig it out in the
+# adapter and pass it here via fee inputs (see FEE_INPUT_KEYS); otherwise we only
+# apply a concrete % where it is publicly documented and flag the rest as
+# "tillkommer". Totals are estimates ("ca").
+#   fee_excl         : concrete buyer fee for this object, EXCL VAT
+#   fee_vat          : VAT % added on the fee (default 25)
+#   fee_pct/min/max  : percentage fee (EXCL VAT) with optional floor/ceiling
+#   vat              : VAT % on the bid itself
+FEE_INPUT_KEYS = ("vat", "fee_excl", "fee_vat", "fee_pct", "fee_min", "fee_max")
+
 FEE_CONFIG = {
-    "Budi":        {"vat": 25, "fee_pct": 16, "fee_min": 195, "note": "Moms 25% + serviceavgift ca 16% (min 195 kr)"},
+    "Budi":        {"vat": 25, "fee_pct": 16, "fee_min": 195, "note": "Moms 25% + serviceavgift ca 16% (min 195 kr) + moms"},
     "PS Auction":  {"vat": 25, "note": "Moms 25% + budavgift tillkommer (se auktionssidan)"},
-    "Klaravik":    {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (se auktionssidan)"},
+    "Klaravik":    {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (visas vid bud)"},
     "Blinto":      {"vat": 25, "note": "Moms 25% + slagavgift tillkommer (se auktionssidan)"},
-    "Fabeo":       {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (se auktionssidan)"},
-    "Netauktion":  {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (se auktionssidan)"},
+    "Fabeo":       {"vat": 25, "note": "Moms 25% + slagavgift tillkommer (se auktionssidan)"},
+    "Netauktion":  {"vat": 25, "note": "Moms 25% + slagavgift tillkommer (se auktionssidan)"},
     "Retrade":     {"vat": 25, "note": "Moms 25% + auktionsavgift + 250 kr/faktura tillkommer"},
     "Tovek":       {"vat": 25, "note": "Moms 25% + fast slagavgift tillkommer (se auktionssidan)"},
     "Tradera":     {"vat": 0,  "fee_pct": 0, "fee_min": 0, "note": "Privatköp – pris som visat (ingen slagavgift)"},
 }
 
 
+def _fmt_kr(n):
+    return f"{int(round(n)):,}".replace(",", " ")
+
+
 def compute_fees(source, bid, it):
     """Return the VAT/fee/total breakdown for an item. buyer_fee is incl. VAT.
-    fee_known=False means a buyer fee applies but the exact amount isn't known."""
+    fee_known=False means a buyer fee applies but the exact amount isn't known.
+    `it` may carry per-object fee inputs (FEE_INPUT_KEYS) dug out by the adapter."""
     cfg = FEE_CONFIG.get(source, {"vat": 25, "note": "Moms 25% + ev. avgift tillkommer"})
     vat = it.get("vat") if it.get("vat") is not None else cfg.get("vat", 25)
     bid = bid or it.get("starting_price") or 0
     vat_amount = round(bid * vat / 100)
     bid_incl = bid + vat_amount
-    if it.get("buyer_fee") is not None:
-        buyer_fee, fee_known = it["buyer_fee"], True
-    elif "fee_pct" in cfg:
-        fee_excl = max(bid * cfg["fee_pct"] / 100, cfg.get("fee_min", 0))
-        buyer_fee, fee_known = round(fee_excl * (1 + vat / 100)), True
+    fee_vat = it.get("fee_vat") if it.get("fee_vat") is not None else cfg.get("fee_vat", 25)
+
+    fee_excl = None
+    if it.get("fee_excl") is not None:
+        fee_excl = it["fee_excl"]
     else:
-        buyer_fee, fee_known = None, False
+        pct = it.get("fee_pct") if it.get("fee_pct") is not None else cfg.get("fee_pct")
+        if pct is not None:
+            fmin = it.get("fee_min") if it.get("fee_min") is not None else cfg.get("fee_min", 0)
+            fmax = it.get("fee_max") if it.get("fee_max") is not None else cfg.get("fee_max")
+            fee_excl = max(bid * pct / 100, fmin or 0)
+            if fmax:
+                fee_excl = min(fee_excl, fmax)
+
+    if fee_excl is not None:
+        buyer_fee, fee_known = round(fee_excl * (1 + fee_vat / 100)), True
+        if buyer_fee > 0:
+            note = (f"Moms {vat}% på bud + slagavgift {_fmt_kr(buyer_fee)} kr (inkl. moms)"
+                    if vat else f"Slagavgift {_fmt_kr(buyer_fee)} kr (inkl. moms)")
+        else:
+            note = cfg.get("note")
+    else:
+        buyer_fee, fee_known, note = None, False, cfg.get("note")
     total_now = bid_incl + (buyer_fee or 0)
     return {"vat": vat, "vat_amount": vat_amount, "bid_incl": bid_incl,
             "buyer_fee": buyer_fee, "fee_known": fee_known,
-            "total_now": total_now, "fee_note": cfg.get("note")}
+            "total_now": total_now, "fee_note": note}
 
 
 
@@ -235,14 +263,21 @@ class Crawler:
         if isinstance(image, str) and image.startswith("http://"):
             image = "https://" + image[len("http://"):]
         bid = it.get("current_bid") or 0
-        f = compute_fees(it["source"], bid, it)
         fixed_price = bool(it.get("fixed_price"))
         existing = await self.db.live_auctions.find_one({"url": it["url"]})
+        incoming_fi = {k: it[k] for k in FEE_INPUT_KEYS if it.get(k) is not None}
+        prev_fi = existing.get("fee_inputs", {}) if existing else {}
+        fee_inputs = {**prev_fi, **incoming_fi}
+        fee_ctx = {**fee_inputs}
+        if it.get("starting_price") is not None:
+            fee_ctx["starting_price"] = it["starting_price"]
+        f = compute_fees(it["source"], bid, fee_ctx)
         if existing:
             keep_bid = (not bid) and existing.get("current_bid")
             update = {
                 "title": it["title"], "image": image,
                 "fixed_price": fixed_price,
+                "fee_inputs": fee_inputs,
                 "last_seen": now,
             }
             if not keep_bid:
@@ -271,6 +306,7 @@ class Crawler:
                 "vat_amount": f["vat_amount"], "bid_incl": f["bid_incl"],
                 "buyer_fee": f["buyer_fee"], "fee_known": f["fee_known"],
                 "fee_note": f["fee_note"], "total_now": f["total_now"], "url": it["url"],
+                "fee_inputs": fee_inputs,
                 "ends_at": it.get("ends_at"), "bid_count": it.get("bid_count"),
                 "starting_price": it.get("starting_price"), "fixed_price": fixed_price,
                 "first_seen": now, "last_seen": now, "last_checked": now,
@@ -291,22 +327,39 @@ class Crawler:
         update = {"last_checked": now, "last_seen": now}
         if res and res.get("ends_at"):
             update["ends_at"] = res["ends_at"]
-        if res and res.get("current_bid"):
-            bid = res["current_bid"]
-            f = compute_fees(doc["source"], bid, {})
-            update["current_bid"] = bid
-            update["vat"] = f["vat"]
-            update["vat_amount"] = f["vat_amount"]
-            update["bid_incl"] = f["bid_incl"]
-            update["buyer_fee"] = f["buyer_fee"]
-            update["fee_known"] = f["fee_known"]
-            update["fee_note"] = f["fee_note"]
-            update["total_now"] = f["total_now"]
-            if bid != doc.get("current_bid"):
-                hist = doc.get("price_history", []) + [{"t": now, "bid": bid}]
-                update["price_history"] = hist[-200:]
+        if res:
+            new_fi = {k: res[k] for k in FEE_INPUT_KEYS if res.get(k) is not None}
+            new_bid = res.get("current_bid")
+            if new_bid or new_fi:
+                bid = new_bid or doc.get("current_bid") or 0
+                fee_inputs = {**doc.get("fee_inputs", {}), **new_fi}
+                fee_ctx = {**fee_inputs, "starting_price": doc.get("starting_price")}
+                f = compute_fees(doc["source"], bid, fee_ctx)
+                update["fee_inputs"] = fee_inputs
+                update["vat"] = f["vat"]
+                update["vat_amount"] = f["vat_amount"]
+                update["bid_incl"] = f["bid_incl"]
+                update["buyer_fee"] = f["buyer_fee"]
+                update["fee_known"] = f["fee_known"]
+                update["fee_note"] = f["fee_note"]
+                update["total_now"] = f["total_now"]
+                if new_bid:
+                    update["current_bid"] = new_bid
+                    if new_bid != doc.get("current_bid"):
+                        hist = doc.get("price_history", []) + [{"t": now, "bid": new_bid}]
+                        update["price_history"] = hist[-200:]
         await self.db.live_auctions.update_one({"url": url}, {"$set": update})
         st.last_action = f"uppdaterade: {doc['title'][:34]}"
+
+    async def refresh_url(self, url):
+        """Refresh a single known item on demand (e.g. right when a user watches
+        it) so its bid + fee are learned immediately instead of on the next pass."""
+        doc = await self.db.live_auctions.find_one({"url": url})
+        if not doc:
+            return
+        st = next((s for s in self.states if s.source == doc.get("source")), None)
+        if st:
+            await self._refresh_one(st, url)
 
     def sync_now(self):
         for st in self.states:

@@ -122,12 +122,12 @@ function App() {
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500 text-slate-950">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-slate-950">
               <Gavel className="h-5 w-5" />
             </div>
-            <div>
-              <h1 className="font-heading text-lg font-extrabold leading-none tracking-tight">Auktionsbevakning<span className="text-amber-400">.se</span></h1>
+            <div className="min-w-0">
+              <h1 className="truncate font-heading text-lg font-extrabold leading-none tracking-tight">Auktionsbevakning<span className="text-amber-400">.se</span></h1>
               <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />

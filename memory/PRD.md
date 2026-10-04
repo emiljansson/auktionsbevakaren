@@ -102,7 +102,19 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - **Kronofogden borttagen** helt (ur ENABLED, SOURCE_STATUS, frontend SOURCES; 37 docs raderade). **8 aktiva källor** nu.
 - Totalt ~3 500 objekt. Klaravik (~60) och Retrade (~138) är server-renderade listor utan enkel paginering → ligger kvar på vad sidan exponerar.
 
+## Exakta slagavgifter per objekt (där sajten exponerar det) – uppdaterat 2026-06
+- Mål (användarens begäran): gräv i varje sajts insamlade objektdata och ta med slagavgiften **endast när sajten presenterar den publikt** (som Tovek).
+- Avgiftsmotorn (`crawler.py compute_fees`) tar nu per-objekt-input via `FEE_INPUT_KEYS = (vat, fee_excl, fee_vat, fee_pct, fee_min, fee_max)`. `fee_inputs` persistas i `live_auctions` och återanvänds vid refresh/re-discovery (skrivs aldrig över med tomt).
+- **Tovek**: `itemFeeValue` (exkl moms, +25% moms alltid) + `itemVatValue` per rop (vid discovery).
+- **Klaravik**: `auctionFee` (exkl moms) + `vat` + bud ur `product-data` JSON (vid refresh).
+- **Fabeo**: "slagavgift på X kr (exkl. moms)" ur objekttexten (vid refresh).
+- **Netauktion**: "Slagavgift X% exkl. moms (min A – max B)" (vid refresh).
+- **Budi**: 16% / min 195 kr (publicerad standard; dynamisk avgift).
+- **Blinto / PS Auction / Retrade**: exakt per-objekt-avgift laddas via Cloudflare-skyddade API:er (skulle kosta ScrapingBee-krediter/objekt) → behåller "+ avgift tillkommer"-not.
+- **Mina bevakningar** (`GET /api/auctions`): berikas alltid med färskaste avgift/bud från live-datan; okända avgifter lärs in on-demand (en gång per objekt). `POST /live/watch` lär in avgiften direkt vid bevakning. Verifierat: Klaravik/Tovek/Fabeo/Netauktion visar nu "Att betala (ca)" med exakt slagavgift.
+- Fixat mobil-overflow i sticky header (min-w-0 + truncate på titeln).
+
 ## Nästa steg (kvar)
-- AI-prisvärdering mot riktig Toolab-data (valuation.py är idag LLM-genererad/uppskattad).
+- AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.
 - Prisfilter/sortering i live-flödet.
