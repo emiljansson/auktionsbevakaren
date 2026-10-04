@@ -1,0 +1,31 @@
+{
+  "summary": "Verified the crawler._upsert bid-preservation fix for the iteration_3 minor regression. Added /app/backend/tests/test_bid_preservation.py (6 tests, all PASS). Core test snapshots Netauktion items that currently have current_bid>0, triggers POST /api/live/sync (which re-runs NetauktionAdapter.discover() returning current_bid=0 by design), waits 30s for re-discovery/_upsert, then re-fetches the same URLs and asserts every snapshot item STILL has current_bid > 0 (not reset to 0). A second-sync double-check also passes. Regression surface re-validated: GET /api/live/status running=true with all 6 active sites (Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden) present and no persistent error; GET /api/live/auctions items all have title/source/url; no Netauktion titles are 'Default Alt Text'; Netauktion current_bid (when >0) still equals product-page '.auction-bid-box-body-price' / 'Nuvarande bud N SEK' and never equals 'Marknadsvärde'. Prior test_netauktion_price_fix.py (8 tests) also still PASS. Total: 14/14 green.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_bid_preservation.py",
+    "/app/backend/tests/test_netauktion_price_fix.py",
+    "/app/test_reports/pytest/bid_preservation.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "crawler._upsert fix is correct and minimal: keep_bid = (not bid) and existing.get('current_bid') cleanly guards the Netauktion-discovery=0 case while still allowing legitimate zero->positive transitions for other sites (they currently emit real bids on discovery). Note that it uses .get('current_bid') truthiness so an existing value of 0 (never-refreshed items) correctly falls through to the overwrite branch — behavior is right.",
+    "price_history still correctly appended only when bid>0 and differs from existing.current_bid, so the preservation path doesn't pollute history with phantom 0 entries.",
+    "Residual (unchanged from iter_3, non-blocking): adapters._netauktion_ends hard-codes +02:00; will be an hour off vs CET in winter. Consider zoneinfo('Europe/Stockholm') for DST-correct parsing."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bid_preservation.py",
+    "/app/test_reports/pytest/bid_preservation.xml",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {"backend": "100% (14/14 tests, 6 new + 8 prior regression)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "N/A (no auth)",
+  "seed_data_creation": "None. Tests validate live-scraped crawler data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_bid_preservation.py explicitly POSTs /api/live/sync to force re-discovery, then waits 30s for the next crawler tick to run NetauktionAdapter.discover() (which emits current_bid=0) through _upsert. If you re-run shortly after a fresh backend restart, Netauktion may not yet have any items with current_bid>0 (the refresh loop fills one item every 10s). The helper _wait_for_bids polls up to 120s to obtain >=3 items with bid>0 before snapshotting; if your run still skips with 'Need >=2 items', just wait ~90s and rerun. Run with: pytest backend/tests/test_bid_preservation.py -o 'addopts=' (pytest.ini uses xdist loadscope which trips on single-file runs).",
+  "rca of the issue": "RCA: NetauktionAdapter.discover() intentionally returns current_bid=0 because the listing cards only expose 'Marknadsvärde' (estimate), not the actual current bid; real bid is read later by refresh_item() from the product page's '.auction-bid-box-body-price'. Previously crawler._upsert unconditionally wrote current_bid=bid=0 on every re-discovery, wiping the refresh-loop-populated positive bids until the per-item refresh loop (1 item / 10s) walked back through ~150 items (~25 min). FIX (verified live): _upsert now computes keep_bid = (not bid) and existing.get('current_bid'); when truthy it skips updating current_bid/buyer_fee/total_now (still updates title/image/last_seen/ends_at/bid_count). Verified by snapshotting bids, POST /api/live/sync, waiting 30s, and confirming all snapshot items retain their positive current_bid (both exact-preserved and refresh-updated-upward counted as PASS; reset-to-0 would fail). Double-sync test also green."
+}
