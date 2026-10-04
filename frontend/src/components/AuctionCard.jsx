@@ -34,7 +34,7 @@ export const AuctionCard = ({ auction, onOpen, onDelete }) => {
           onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1603816885871-c122a9ff8d40?w=800&q=80"; }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#111827] via-transparent to-transparent" />
-        <Badge className={`absolute left-3 top-3 border font-mono text-[11px] ${badgeClass(auction.source)}`}>
+        <Badge className={`absolute left-3 top-3 border font-mono text-[11px] font-semibold shadow-lg backdrop-blur-md ${badgeClass(auction.source)}`} style={{ backgroundColor: "rgba(11,15,25,0.65)" }}>
           {auction.source}
         </Badge>
         {tl && (
