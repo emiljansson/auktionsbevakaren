@@ -110,7 +110,8 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - **Fabeo**: "slagavgift på X kr (exkl. moms)" ur objekttexten (vid refresh).
 - **Netauktion**: "Slagavgift X% exkl. moms (min A – max B)" (vid refresh).
 - **Budi**: 16% / min 195 kr (publicerad standard; dynamisk avgift).
-- **Blinto / PS Auction / Retrade**: exakt per-objekt-avgift laddas via Cloudflare-skyddade API:er (skulle kosta ScrapingBee-krediter/objekt) → behåller "+ avgift tillkommer"-not.
+- **Blinto**: exakt per-objekt-slagavgift hämtas nu **on-demand för bevakade objekt** via `BlintoAdapter.fetch_fee` (ett billigt ScrapingBee-anrop, render_js=False) som parsar "slagavgift på X SEK (exkl. moms)" ur sidan. Budget-skydd: bakgrundsloopen hämtar ALDRIG Blinto-detaljer (`refresh_item` är no-op); `crawler.learn_fee` körs bara för bevakade objekt med okänd avgift, en gång per objekt, med 6h retry-cooldown (`fee_last_try`) vid miss. Verifierat: bevakat Blinto-objekt visar "Att betala (ca)" med exakt slagavgift.
+- **PS Auction / Retrade**: exakt per-objekt-avgift bakom skyddade API:er → behåller "+ avgift tillkommer"-not.
 - **Mina bevakningar** (`GET /api/auctions`): berikas alltid med färskaste avgift/bud från live-datan; okända avgifter lärs in on-demand (en gång per objekt). `POST /live/watch` lär in avgiften direkt vid bevakning. Verifierat: Klaravik/Tovek/Fabeo/Netauktion visar nu "Att betala (ca)" med exakt slagavgift.
 - Fixat mobil-overflow i sticky header (min-w-0 + truncate på titeln).
 

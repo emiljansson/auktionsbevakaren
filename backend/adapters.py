@@ -13,6 +13,7 @@ import os
 import re
 import json
 import logging
+import html as _html
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -614,6 +615,18 @@ class BlintoAdapter:
 
     async def refresh_item(self, url):
         return None  # full catalogue refreshes on each discovery pass
+
+    async def fetch_fee(self, url):
+        """On-demand ONLY (watched items) – one ScrapingBee fetch (no JS, cheap).
+        Blinto renders the exact per-object slagavgift into the page HTML, e.g.
+        "... samt slagavgift på 17 400 SEK (exkl. moms)."."""
+        html = _html.unescape(await _scrapingbee_get(url, render_js=False))
+        res = {}
+        m = re.search(r"slagavgift\s*p[åa]\s*([\d\s\u00a0\.]+)\s*(?:SEK|kr)\s*\(exkl", html, re.I)
+        if m:
+            res["fee_excl"] = _to_int(m.group(1))
+            res["fee_vat"] = 25
+        return res or None
 
 
 # Active adapters (reliably scrapable server-side, with per-item links)

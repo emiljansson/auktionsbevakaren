@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -104,10 +104,14 @@ async def list_auctions(source: Optional[str] = None):
         async for lv in db.live_auctions.find({"url": {"$in": urls}}, {"_id": 0}):
             live_map[lv["url"]] = lv
     # One-time per item: if the live doc hasn't learned the exact fee yet, learn
-    # it now (self-limiting – stops once fee_known is True).
-    unknown = [u for u, lv in live_map.items() if not lv.get("fee_known")][:10]
+    # it now (self-limiting – stops once fee_known is True; failures are retried
+    # at most every 6h via fee_last_try so Blinto fetches stay frugal).
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+    unknown = [u for u, lv in live_map.items()
+               if not lv.get("fee_known")
+               and (not lv.get("fee_last_try") or lv["fee_last_try"] < cutoff)][:10]
     if unknown:
-        await asyncio.gather(*[crawler.refresh_url(u) for u in unknown],
+        await asyncio.gather(*[crawler.learn_fee(u) for u in unknown],
                              return_exceptions=True)
         async for lv in db.live_auctions.find({"url": {"$in": unknown}}, {"_id": 0}):
             live_map[lv["url"]] = lv
@@ -303,10 +307,10 @@ async def watch_live(payload: WatchCreate):
     # item shows the fee immediately (Klaravik/Fabeo/Netauktion learn it per item).
     if not doc.get("fee_known"):
         try:
-            await crawler.refresh_url(payload.url)
+            await crawler.learn_fee(payload.url)
             doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0}) or doc
         except Exception:
-            logger.exception("watch refresh_url failed")
+            logger.exception("watch learn_fee failed")
     history = scraper.generate_bid_history(doc["current_bid"], max(len(doc.get("price_history", [])), 3))
     auction = Auction(
         source=doc["source"], title=doc["title"], image=doc.get("image"),

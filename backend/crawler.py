@@ -317,13 +317,17 @@ class Crawler:
         doc = await self.db.live_auctions.find_one({"url": url})
         if not doc:
             return
-        now = _iso()
         try:
             res = await st.adapter.refresh_item(url)
         except Exception as e:
             st.error = f"refresh: {e}"
-            await self.db.live_auctions.update_one({"url": url}, {"$set": {"last_checked": now}})
+            await self.db.live_auctions.update_one({"url": url}, {"$set": {"last_checked": _iso()}})
             return
+        await self._apply_res(url, doc, res)
+        st.last_action = f"uppdaterade: {doc['title'][:34]}"
+
+    async def _apply_res(self, url, doc, res):
+        now = _iso()
         update = {"last_checked": now, "last_seen": now}
         if res and res.get("ends_at"):
             update["ends_at"] = res["ends_at"]
@@ -349,7 +353,31 @@ class Crawler:
                         hist = doc.get("price_history", []) + [{"t": now, "bid": new_bid}]
                         update["price_history"] = hist[-200:]
         await self.db.live_auctions.update_one({"url": url}, {"$set": update})
-        st.last_action = f"uppdaterade: {doc['title'][:34]}"
+
+    async def learn_fee(self, url):
+        """On-demand fee learning for a single (usually watched) item. For Blinto
+        this does ONE cheap ScrapingBee fetch; other sites use their normal
+        per-item refresh. Self-limiting – callers only trigger it while the fee
+        is still unknown."""
+        doc = await self.db.live_auctions.find_one({"url": url})
+        if not doc:
+            return
+        adapter = next((s.adapter for s in self.states if s.source == doc.get("source")), None)
+        if not adapter:
+            return
+        try:
+            if doc.get("source") == "Blinto" and hasattr(adapter, "fetch_fee"):
+                res = await adapter.fetch_fee(url)
+            else:
+                res = await adapter.refresh_item(url)
+        except Exception:
+            logger.exception("learn_fee failed for %s", url)
+            res = None
+        # Stamp the attempt so a page that never exposes its fee isn't re-fetched
+        # on every poll (protects the ScrapingBee budget for Blinto).
+        await self.db.live_auctions.update_one({"url": url}, {"$set": {"fee_last_try": _iso()}})
+        if res:
+            await self._apply_res(url, doc, res)
 
     async def refresh_url(self, url):
         """Refresh a single known item on demand (e.g. right when a user watches
