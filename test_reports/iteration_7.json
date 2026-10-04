@@ -1,0 +1,31 @@
+{
+  "summary": "Backend-only testing for the two just-fixed issues: (1) global ascending sort by ends_at + stability across refreshes (anti-jumping), and (2) PS Auction exact end-time (HH:MM) per item + no past-ended items. Created /app/backend/tests/test_live_sort_stability.py with 8 pytest tests - ALL 8 PASS. Verified: 120 items returned by GET /api/live/auctions?limit=120, all have ends_at and are strictly ascending; two consecutive calls 3s apart produce identical ordering over all 120 common items (jumping bug fixed). No returned item has ends_at <= now. PS Auction (?source=PS%20Auction): 13 current items, 100% have ISO ends_at with explicit HH:MM time-of-day across 13 distinct minute buckets (staggered minute-by-minute as expected), all urls match ^https://psauction.se/item/view/\\d+/, current_bid is int>=0. Regression: /api/live/status running=true with all 8 sources (Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden, Tovek, PS Auction), no persistent errors; Tovek has 100+ items on /auktion/rop/; Netauktion has no 'Default Alt Text' titles; every item has non-empty title and http(s) url.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "backend reload", "issue": "Confirmed again: uvicorn WatchFiles watches /app/backend/tests/*; writing the new test file triggered a reload that got stuck in 'Shutting down' for several minutes (Playwright/async crawler tasks). Had to supervisorctl restart backend. Previously flagged in iteration_6 - still unaddressed. Fix: exclude tests/ from --reload-dir or add a shutdown timeout."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_live_sort_stability.py",
+    "/app/test_reports/pytest/live_sort_stability.xml"
+  ],
+  "action_items": [
+    "(Optional) Exclude /app/backend/tests from uvicorn --reload-dir, or add a hard shutdown timeout, so test-file edits don't hang the server waiting on Playwright shutdown."
+  ],
+  "critical_code_review_comments": [
+    "GET /api/live/auctions parses ends_at and filters past-ended items in Python after fetching up to 3000 docs; works correctly but will not scale once live_auctions grows past tens of thousands. Consider storing ends_at as a BSON Date and sorting/filtering in Mongo (indexed) rather than in-process.",
+    "PS Auction's 13 items is far fewer than the ~22 the main agent reported after the most recent collect; natural attrition is expected since the past-ended filter is now active. No action needed, but worth noting that card density on the live feed will drop over the 4h cadence between PS collects."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_live_sort_stability.py"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "n/a (no auth)",
+  "seed_data_creation": "none; used live external data via the running crawler",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_live_sort_stability.py covers the sort/stability + PS exact-end-time fixes plus the 8-source regression. If backend becomes unresponsive after editing files under /app/backend/tests, do `sudo supervisorctl restart backend` - it's a known reload hang caused by uvicorn watching the tests dir while Playwright is in-flight. Field name for status.sites[] is `source`, not `name`.",
+  "rca of the issue": "No functional bugs. All reported fixes verified: (a) /api/live/auctions sort is deterministic ascending on ends_at with None last and past-ended excluded -> stable across refreshes; (b) PS Auction items now expose exact HH:MM ends_at (both explicit and derived-from-'Tid kvar' paths) and ended items are skipped before upsert."
+}

@@ -320,6 +320,7 @@ class KronofogdenAdapter:
 # ---- Tovek (Next.js Server Actions, no login needed) ----
 TOVEK_ACT_AUCTIONS = "7f8f949b85599ee0545667288ad781b5e46ed3822d"
 TOVEK_ACT_ITEMS = "7f88556099d83557895271d6f6135913755dfc8976"
+TOVEK_ACT_BIDS = "7f793e0ef55011c257e2db8306e27783b561adaa5f"
 TOVEK_PAGE = "https://tovek.se/auktioner/pagaende-auktioner"
 
 
@@ -364,8 +365,24 @@ def _tovek_ends(s):
 class TovekAdapter:
     source = "Tovek"
 
+    async def _bids_map(self, item_ids):
+        """itemId -> {bid, ends} via getRecentItemBidsByItemIds (batched)."""
+        out = {}
+        for i in range(0, len(item_ids), 100):
+            chunk = item_ids[i:i + 100]
+            try:
+                data = await _tovek_action(TOVEK_ACT_BIDS, [chunk])
+            except Exception:
+                continue
+            for entry in data.get("allItemBids", []):
+                iid = entry.get("itemId")
+                bids = entry.get("bids") or []
+                top = max((b.get("historyBidValue") or 0 for b in bids), default=0)
+                out[iid] = {"bid": top, "ends": _tovek_ends(entry.get("itemEndTime"))}
+        return out
+
     async def discover(self):
-        out, seen_parts = [], set()
+        raw, seen_parts = [], set()
         for page in range(1, 4):
             data = await _tovek_action(TOVEK_ACT_AUCTIONS, [{"partStatus": "running"}, page])
             aucs = [a for a in data.get("auctions", []) if a.get("partStatus") == "running"]
@@ -381,33 +398,45 @@ class TovekAdapter:
                 except Exception:
                     continue
                 for it in idata.get("auctionItems", []):
-                    if it.get("itemStatus") != "active":
-                        continue
-                    iid = it.get("itemId")
-                    if not iid:
+                    if it.get("itemStatus") != "active" or not it.get("itemId"):
                         continue
                     imgs = it.get("images") or []
-                    out.append({
-                        "source": self.source,
+                    raw.append({
+                        "iid": it["itemId"],
                         "title": (it.get("itemTitle") or "Objekt").strip(),
                         "image": imgs[0] if imgs else None,
-                        "current_bid": it.get("itemWinningBidValue") or 0,
-                        "ends_at": _tovek_ends(it.get("itemEndTime") or it.get("itemLastEndDate")),
-                        "url": f"https://tovek.se/auktion/rop/{_slugify(it.get('itemTitle'))}/{iid}",
+                        "min": it.get("itemMinBid") or 0,
+                        "ends_item": _tovek_ends(it.get("itemEndTime") or it.get("itemLastEndDate")),
                     })
-            if len(out) >= 400:
+            if len(raw) >= 400:
                 break
+        bids = await self._bids_map([r["iid"] for r in raw])
+        out = []
+        for r in raw:
+            b = bids.get(r["iid"], {})
+            bid = b.get("bid") or 0
+            out.append({
+                "source": self.source, "title": r["title"], "image": r["image"],
+                "current_bid": bid,
+                "starting_price": (r["min"] or None) if not bid else None,
+                "ends_at": b.get("ends") or r["ends_item"],
+                "url": f"https://tovek.se/auktion/rop/{_slugify(r['title'])}/{r['iid']}",
+            })
         return out
 
     async def refresh_item(self, url):
-        html = (await _get(url)).replace('\\"', '"')
-        bm = re.search(r'"itemWinningBidValue":(\d+)', html)
-        em = re.search(r'"itemLastEndDate":"([^"]+)"', html) or re.search(r'"itemEndTime":"([^"]+)"', html)
-        bid = int(bm.group(1)) if bm else None
-        ends = _tovek_ends(em.group(1)) if em else None
-        if bid:
-            return {"current_bid": bid, "ends_at": ends}
-        return {"ends_at": ends} if ends else None
+        m = re.search(r"/rop/[^/]+/(\d+)", url)
+        if not m:
+            return None
+        iid = int(m.group(1))
+        bmap = await self._bids_map([iid])
+        info = bmap.get(iid)
+        if not info:
+            return None
+        res = {"ends_at": info.get("ends")}
+        if info.get("bid"):
+            res["current_bid"] = info["bid"]
+        return res
 
 
 class PSAuctionAdapter:
