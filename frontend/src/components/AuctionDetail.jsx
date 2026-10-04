@@ -62,12 +62,15 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
             <Metric label="Nuvarande bud" value={formatSEK(auction.current_bid)} accent="text-amber-400" />
             <Metric label="Antal bud" value={`${auction.bid_count} st`} />
             <Metric label={`Totalpris ${vatIncl ? "inkl." : "exkl."} moms`} value={formatSEK(bidPriceDisplay)} />
-            <Metric label="Köparavgift" value={formatSEK(auction.buyer_fee)} />
-            <div className="col-span-2 flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs">
-              <span className="text-slate-400">Moms {auction.vat}% · Visa totalpris</span>
-              <Button size="sm" variant="outline" onClick={() => setVatIncl(!vatIncl)} data-testid="toggle-vat" className="h-7 border-slate-700 text-slate-300 hover:bg-slate-800">
-                {vatIncl ? "Inkl. moms" : "Exkl. moms"}
-              </Button>
+            <Metric label="Slagavgift" value={auction.fee_known ? formatSEK(auction.buyer_fee) : "Tillkommer"} />
+            <div className="col-span-2 rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Moms {auction.vat}% · Visa totalpris</span>
+                <Button size="sm" variant="outline" onClick={() => setVatIncl(!vatIncl)} data-testid="toggle-vat" className="h-7 border-slate-700 text-slate-300 hover:bg-slate-800">
+                  {vatIncl ? "Inkl. moms" : "Exkl. moms"}
+                </Button>
+              </div>
+              {auction.fee_note && <p className="mt-2 text-[11px] text-slate-500">{auction.fee_note}</p>}
             </div>
           </div>
         </div>

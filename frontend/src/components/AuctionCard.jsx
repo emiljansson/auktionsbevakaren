@@ -54,16 +54,21 @@ export const AuctionCard = ({ auction, onOpen, onDelete }) => {
 
         <div className="flex items-end justify-between">
           <div>
-            <p className="text-[11px] font-mono uppercase tracking-wider text-slate-500">Nuvarande bud</p>
-            <p className="font-heading text-2xl font-bold text-amber-400">{formatSEK(auction.current_bid)}</p>
+            <p className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
+              {auction.fixed_price ? "Fastpris · Köp nu" : auction.current_bid > 0 ? "Nuvarande bud" : "Utropspris · inga bud"}
+            </p>
+            <p className="font-heading text-2xl font-bold text-amber-400">
+              {formatSEK(auction.current_bid > 0 ? auction.current_bid : (auction.starting_price || auction.current_bid))}
+            </p>
           </div>
           <div className="flex items-center gap-1 rounded-md bg-slate-800/60 px-2 py-1 text-xs text-slate-300">
-            <Gavel className="h-3.5 w-3.5" /> {auction.bid_count} bud
+            <Gavel className="h-3.5 w-3.5" /> {auction.bid_count || 0} bud
           </div>
         </div>
 
-        <div className="rounded-lg bg-slate-800/40 px-3 py-2 text-xs text-slate-400">
-          Totalt inkl. moms & avgift: <span className="font-semibold text-slate-200">{formatSEK(auction.total_now)}</span>
+        <div className="rounded-lg bg-slate-800/40 px-3 py-2 text-xs text-slate-400" title={auction.fee_note || ""}>
+          {auction.fee_known ? "Att betala (ca)" : "Inkl. moms (+ avgift tillkommer)"}: <span className="font-semibold text-slate-200">{formatSEK(auction.total_now)}</span>
+          {auction.fee_note && <p className="mt-0.5 text-[10px] text-slate-500">{auction.fee_note}</p>}
         </div>
 
         {val ? (

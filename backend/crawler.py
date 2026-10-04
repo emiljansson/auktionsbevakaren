@@ -21,6 +21,46 @@ logger = logging.getLogger("crawler")
 INTERVAL = int(os.environ.get("CRAWL_INTERVAL_SECONDS", "10"))
 REST_SECONDS = int(os.environ.get("CRAWL_REST_SECONDS", str(4 * 3600)))
 
+# Buyer premium (slagavgift/inropsavgift) + VAT per source. Most Swedish B2B
+# auction sites quote bids EXCL. VAT and add 25% VAT on both bid and fee. The
+# exact buyer fee usually varies per object (shown on the auction page / after
+# login), so we only apply a concrete % where it is publicly documented and
+# otherwise flag it as "tillkommer". Totals are estimates ("ca").
+FEE_CONFIG = {
+    "Budi":        {"vat": 25, "fee_pct": 16, "fee_min": 195, "note": "Moms 25% + serviceavgift ca 16% (min 195 kr)"},
+    "PS Auction":  {"vat": 25, "note": "Moms 25% + budavgift tillkommer (se auktionssidan)"},
+    "Klaravik":    {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (se auktionssidan)"},
+    "Blinto":      {"vat": 25, "note": "Moms 25% + slagavgift tillkommer (se auktionssidan)"},
+    "Fabeo":       {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (se auktionssidan)"},
+    "Netauktion":  {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (se auktionssidan)"},
+    "Retrade":     {"vat": 25, "note": "Moms 25% + auktionsavgift + 250 kr/faktura tillkommer"},
+    "Tovek":       {"vat": 25, "note": "Moms 25% + fast slagavgift tillkommer (se auktionssidan)"},
+    "Tradera":     {"vat": 0,  "fee_pct": 0, "fee_min": 0, "note": "Privatköp – pris som visat (ingen slagavgift)"},
+}
+
+
+def compute_fees(source, bid, it):
+    """Return the VAT/fee/total breakdown for an item. buyer_fee is incl. VAT.
+    fee_known=False means a buyer fee applies but the exact amount isn't known."""
+    cfg = FEE_CONFIG.get(source, {"vat": 25, "note": "Moms 25% + ev. avgift tillkommer"})
+    vat = it.get("vat") if it.get("vat") is not None else cfg.get("vat", 25)
+    bid = bid or it.get("starting_price") or 0
+    vat_amount = round(bid * vat / 100)
+    bid_incl = bid + vat_amount
+    if it.get("buyer_fee") is not None:
+        buyer_fee, fee_known = it["buyer_fee"], True
+    elif "fee_pct" in cfg:
+        fee_excl = max(bid * cfg["fee_pct"] / 100, cfg.get("fee_min", 0))
+        buyer_fee, fee_known = round(fee_excl * (1 + vat / 100)), True
+    else:
+        buyer_fee, fee_known = None, False
+    total_now = bid_incl + (buyer_fee or 0)
+    return {"vat": vat, "vat_amount": vat_amount, "bid_incl": bid_incl,
+            "buyer_fee": buyer_fee, "fee_known": fee_known,
+            "total_now": total_now, "fee_note": cfg.get("note")}
+
+
+
 
 def _now():
     return datetime.now(timezone.utc)
@@ -54,10 +94,10 @@ class SiteState:
     @property
     def phase(self):
         if self.resting_until and _secs_since(self.resting_until) < 0:
-            return "resting"
+            return "vilar"
         if not self.queue:
-            return "discovering"
-        return "crawling"
+            return "söker nya objekt"
+        return "uppdaterar bud"
 
     def to_dict(self):
         rest_left = None
@@ -195,9 +235,7 @@ class Crawler:
         if isinstance(image, str) and image.startswith("http://"):
             image = "https://" + image[len("http://"):]
         bid = it.get("current_bid") or 0
-        vat = it.get("vat", 25)
-        buyer_fee = it["buyer_fee"] if it.get("buyer_fee") is not None else round(bid * 0.10)
-        total_now = round(bid * (1 + vat / 100) + buyer_fee)
+        f = compute_fees(it["source"], bid, it)
         fixed_price = bool(it.get("fixed_price"))
         existing = await self.db.live_auctions.find_one({"url": it["url"]})
         if existing:
@@ -209,8 +247,13 @@ class Crawler:
             }
             if not keep_bid:
                 update["current_bid"] = bid
-                update["buyer_fee"] = buyer_fee
-                update["total_now"] = total_now
+                update["vat"] = f["vat"]
+                update["vat_amount"] = f["vat_amount"]
+                update["bid_incl"] = f["bid_incl"]
+                update["buyer_fee"] = f["buyer_fee"]
+                update["fee_known"] = f["fee_known"]
+                update["fee_note"] = f["fee_note"]
+                update["total_now"] = f["total_now"]
             if it.get("ends_at"):
                 update["ends_at"] = it["ends_at"]
             if it.get("bid_count") is not None:
@@ -224,8 +267,10 @@ class Crawler:
         else:
             await self.db.live_auctions.insert_one({
                 "source": it["source"], "title": it["title"], "image": image,
-                "current_bid": bid, "currency": "SEK", "vat": vat,
-                "buyer_fee": buyer_fee, "total_now": total_now, "url": it["url"],
+                "current_bid": bid, "currency": "SEK", "vat": f["vat"],
+                "vat_amount": f["vat_amount"], "bid_incl": f["bid_incl"],
+                "buyer_fee": f["buyer_fee"], "fee_known": f["fee_known"],
+                "fee_note": f["fee_note"], "total_now": f["total_now"], "url": it["url"],
                 "ends_at": it.get("ends_at"), "bid_count": it.get("bid_count"),
                 "starting_price": it.get("starting_price"), "fixed_price": fixed_price,
                 "first_seen": now, "last_seen": now, "last_checked": now,
@@ -248,10 +293,15 @@ class Crawler:
             update["ends_at"] = res["ends_at"]
         if res and res.get("current_bid"):
             bid = res["current_bid"]
-            vat = doc.get("vat", 25)
+            f = compute_fees(doc["source"], bid, {})
             update["current_bid"] = bid
-            update["buyer_fee"] = round(bid * 0.10)
-            update["total_now"] = round(bid * (1 + vat / 100) + round(bid * 0.10))
+            update["vat"] = f["vat"]
+            update["vat_amount"] = f["vat_amount"]
+            update["bid_incl"] = f["bid_incl"]
+            update["buyer_fee"] = f["buyer_fee"]
+            update["fee_known"] = f["fee_known"]
+            update["fee_note"] = f["fee_note"]
+            update["total_now"] = f["total_now"]
             if bid != doc.get("current_bid"):
                 hist = doc.get("price_history", []) + [{"t": now, "bid": bid}]
                 update["price_history"] = hist[-200:]

@@ -61,6 +61,12 @@ const LiveCard = ({ a, onWatch, watching }) => {
             <p className="font-heading text-sm font-semibold text-slate-300">{a.source === "Kronofogden" ? "Se auktion för detaljer" : "Se auktion"}</p>
           </>
         )}
+        {!a.fixed_price && (a.current_bid > 0 || a.starting_price > 0) && a.total_now > 0 && (
+          <p className="mt-1 text-[10px] text-slate-500" title={a.fee_note || ""}>
+            ≈ <span className="font-semibold text-slate-300">{formatSEK(a.total_now)}</span>{" "}
+            {a.fee_known ? "att betala (ca)" : "inkl. moms · + avgift"}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-2 pt-1">
         <Button size="sm" onClick={() => onWatch(a)} disabled={watching === a.url}
@@ -159,11 +165,8 @@ export const LiveFeed = ({ onWatchAdded }) => {
             Auto-crawler
           </span>
           <span className="text-xs text-slate-400" data-testid="crawler-status-text">
-            {status?.live_count ?? 0} objekt · 1 var {status?.interval_seconds || 10}:e s · {status?.last_action || "…"}
+            {status?.live_count ?? 0} objekt · uppdaterar 1 var {status?.interval_seconds || 10}:e sekund · {status?.last_action || "…"}
           </span>
-          <Button size="sm" onClick={handleSync} disabled={syncing} data-testid="sync-now-button" className="ml-auto h-7 bg-amber-500 text-slate-950 hover:bg-amber-600">
-            {syncing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />} Synka
-          </Button>
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
           {Object.entries(sources).map(([name, s]) => {
