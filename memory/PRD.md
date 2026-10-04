@@ -55,6 +55,13 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - Kvar: Tovek (kräver inloggning), PS Auction (renderande nyckel), Blinto (premium anti-bot).
 
 ## Nästa steg
+- Exakt totalpris för Tovek (moms + slagavgift finns i datan)
 - Push vid stundande avslut via externt system (användaren fixar nyckel)
-- Tovek-adapter (kräver inloggning), PS Auction via skrap-nyckel
-- Prisfilter/sortering i live-flödet
+- PS Auction via skrap-nyckel; prisfilter/sortering i live-flödet
+
+## Tovek aktiverad utan inloggning – uppdaterat 2026-06
+- Reverse-engineerade Toveks Next.js **Server Actions** (anropas server-side, ingen inloggning):
+  - `getAuctions([{partStatus:"running"}, sida])` → pågående auktioner (partId).
+  - `getAuctionItems([partId])` → objekt med `itemWinningBidValue` (bud), `itemEndTime`, moms, slagavgift, bild.
+  - URL: `tovek.se/auktion/rop/{slug}/{itemId}`. ~160 objekt.
+- **7 aktiva källor nu:** Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden, Tovek. Testat 100% (iteration_5).

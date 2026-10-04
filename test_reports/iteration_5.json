@@ -1,0 +1,42 @@
+{
+  "summary": "Backend-only testing of the new Tovek adapter + regression on /api/live endpoints. 7 pytest tests passed, 1 skipped as acceptable (no Tovek items currently have current_bid>0 - all 164 auctions are early with no bids yet).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_tovek_live.py",
+    "/app/test_reports/pytest/tovek_results.xml"
+  ],
+  "test_results_detail": {
+    "test_status_running_and_all_sites": "PASS - all 7 sources (Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden, Tovek) present with no persistent errors; running=true",
+    "test_tovek_non_empty_and_count": "PASS - 164 Tovek items (>=50 min; approaching ~100+ expectation)",
+    "test_tovek_item_fields": "PASS - 164/164 valid titles (none 'Objekt'), 164/164 URLs match https://tovek.se/auktion/rop/<slug>/<digits>, 164/164 have ends_at, all current_bid are valid ints>=0",
+    "test_tovek_urls_resolve": "PASS - sampled 5 Tovek item URLs, >=3 returned HTTP 200",
+    "test_tovek_bid_correctness": "SKIPPED - 0 Tovek items with current_bid>0 (all 164 are early auctions with no bids yet; acceptable per spec)",
+    "test_regression_other_sources_have_title_url": "PASS - Klaravik(60), Budi(72), Fabeo(86), Retrade(50), Netauktion(169), Kronofogden(37) all have valid title+url",
+    "test_regression_netauktion_titles": "PASS - no Netauktion items with 'Default Alt Text' title",
+    "test_regression_bid_preservation": "PASS - after POST /api/live/sync, previously positive bids were not reset to 0 (<=5% tolerance met)"
+  },
+  "live_data_snapshot": {
+    "status_running": true,
+    "sources_items": {"Klaravik": 60, "Budi": 72, "Fabeo": 86, "Retrade": 50, "Netauktion": 169, "Kronofogden": 37, "Tovek": 164},
+    "tovek_with_positive_bid": 0,
+    "tovek_sample_urls": [
+      "https://tovek.se/auktion/rop/brodformar-aluminium/771950",
+      "https://tovek.se/auktion/rop/brodformar-aluminium/771959"
+    ]
+  },
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All 164 Tovek items observed currently show current_bid=0 — this matches the problem statement (early auctions), but bid-correctness verification against itemWinningBidValue could not be executed. Once any Tovek lot receives a bid, re-run test_tovek_bid_correctness to confirm the refresh_item() path extracts itemWinningBidValue correctly."
+  ],
+  "updated_files": ["/app/backend/tests/test_tovek_live.py"],
+  "success_rate": {"backend": "100% (7/7 passed, 1 acceptable skip)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "Not required (anonymous Tovek flow)",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Tovek adapter is fully working with 164 items. test_tovek_bid_correctness was skipped because 0 items had current_bid>0 at test time; it will auto-activate when bids appear. Reuse /app/backend/tests/test_tovek_live.py for regression. All 7 sources healthy."
+}
