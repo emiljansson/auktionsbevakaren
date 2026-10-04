@@ -52,6 +52,16 @@ def _bids_from_text(t):
     return int(m.group(1)) if m else None
 
 
+def _netauktion_ends(text):
+    m = re.search(r"Avslutas:?\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)", text or "")
+    if not m:
+        return None
+    t = m.group(2)
+    if len(t) == 5:
+        t += ":00"
+    return f"{m.group(1)}T{t}+02:00"
+
+
 async def _get(url):
     async with httpx.AsyncClient(headers=HEADERS, timeout=25, follow_redirects=True) as c:
         r = await c.get(url)
@@ -255,9 +265,12 @@ class NetauktionAdapter:
                 if image and image.startswith("/"):
                     image = self.base + image
                 text = card.get_text(" ", strip=True)
+                # The listing card only shows "Marknadsvärde" (an estimate), not the
+                # current bid. Leave current_bid=0 here; refresh_item reads the real
+                # "Nuvarande bud" from the product page. Capture end time from the card.
                 out.append({"source": self.source, "title": title, "image": image,
-                            "current_bid": _price_from_text(text) or 0,
-                            "bid_count": _bids_from_text(text),
+                            "current_bid": 0,
+                            "ends_at": _netauktion_ends(text),
                             "url": self.base + u if u.startswith("/") else u})
             if len(out) >= 300:
                 break
@@ -265,9 +278,17 @@ class NetauktionAdapter:
 
     async def refresh_item(self, url):
         soup = BeautifulSoup(await _get(url), "lxml")
-        text = soup.get_text(" ", strip=True)
-        price = _price_from_text(text)
-        return {"current_bid": price} if price else None
+        bid = None
+        el = soup.select_one(".auction-bid-box-body-price")
+        if el:
+            bid = _to_int(re.sub(r"[^\d]", "", el.get_text()))
+        if not bid:
+            m = re.search(r"Nuvarande bud\s*([\d\s\u00a0\.]+)\s*(?:SEK|kr)", soup.get_text(" ", strip=True), re.I)
+            bid = _to_int(m.group(1)) if m else None
+        ends = _netauktion_ends(soup.get_text(" ", strip=True))
+        if bid:
+            return {"current_bid": bid, "ends_at": ends}
+        return {"ends_at": ends} if ends else None
 
 
 class KronofogdenAdapter:

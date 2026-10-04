@@ -47,8 +47,8 @@ const LiveCard = ({ a, onWatch, watching }) => {
           </>
         ) : (
           <>
-            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Exekutiv försäljning</p>
-            <p className="font-heading text-sm font-semibold text-slate-300">Se auktion för detaljer</p>
+            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">{a.source === "Kronofogden" ? "Exekutiv försäljning" : "Inga bud ännu"}</p>
+            <p className="font-heading text-sm font-semibold text-slate-300">{a.source === "Kronofogden" ? "Se auktion för detaljer" : "Hämtar bud…"}</p>
           </>
         )}
       </div>

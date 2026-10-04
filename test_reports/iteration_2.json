@@ -1,0 +1,32 @@
+{
+  "summary": "Verified Netauktion title bug fix on live backend. New pytest suite /app/backend/tests/test_live_netauktion.py runs 10 tests, all pass. Netauktion returns 164+ queued/169 items with real per-object titles (e.g. 'Släpkärra Bålsta -88 (CJU907)', 'Konferensbord + stolar', 'Tappningslinje', 'Champagne', 'Harley Davidson, trä'); none equal 'Default Alt Text', none end with trailing ', <lot#>' suffix, titles are varied (>50% unique across sample of 30) and slug tokens overlap with URL product slug (strict check passed). Regression on other sources OK: Klaravik, Budi, Retrade all return items with non-empty title + url, majority have current_bid>0 (Retrade has a few items with no bids yet, which is real data — assertion relaxed to majority). /api/live/status: running=true, all 6 active sites (Klaravik, Budi, Fabeo, Retrade, Netauktion, Kronofogden) in 'crawling' phase, Netauktion present with no error. /api/live/auctions (no filter) returns mixed list across all 6 sources, every item has title/source/url.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/live/auctions?source=Retrade", "issue": "A few Retrade items have current_bid=0 (no bids yet). Not a bug per se; expected for new items, but the UI may want to show 'Inga bud' instead of a 0 kr total."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_live_netauktion.py",
+    "/app/test_reports/pytest/netauktion_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "NetauktionAdapter.discover now correctly reads '.object-card-title-text', strips trailing lot suffix via re.sub(r',\\s*\\d+\\s*$', '', ...) and normalizes whitespace — verified against live data.",
+    "Consider also stripping/handling the '(2)', '(3)' quantity suffix only if duplicates become an issue — currently fine and human-readable.",
+    "Retrade adapter yields items with current_bid=0 for just-listed objects; consider marking those with a boolean has_bids or filtering out until a first bid exists."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_live_netauktion.py",
+    "/app/test_reports/pytest/netauktion_results.xml",
+    "/app/test_reports/iteration_2.json"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "N/A - open app, no auth",
+  "seed_data_creation": "None. Used live scraped data from netauktion.se already populated by background crawler.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Live scraping endpoints under /api/live/*. Netauktion title fix fully validated. The new test file test_live_netauktion.py is reusable regression for all 6 active live sources. If Netauktion becomes empty, POST /api/live/sync and wait ~45s (test already retries up to 3 times).",
+  "rca of the issue": "RCA: NetauktionAdapter previously derived the item title from the <img alt=...> attribute of the card. On netauktion.se the alt attribute is frequently 'Default Alt Text' or the parent auction/category name repeated for every object on the page, producing identical/incorrect titles across many unrelated items. Fix: read title from the card element '.object-card-title-text' (the real per-object label), fall back to img alt only when it is not literally 'default alt text', then strip the trailing lot number ', NN' and collapse whitespace. Verified live: titles now unique, descriptive, and slug-consistent with the product URL."
+}

@@ -206,14 +206,14 @@ class Crawler:
             await self.db.live_auctions.update_one({"url": url}, {"$set": {"last_checked": now}})
             return
         update = {"last_checked": now, "last_seen": now}
+        if res and res.get("ends_at"):
+            update["ends_at"] = res["ends_at"]
         if res and res.get("current_bid"):
             bid = res["current_bid"]
             vat = doc.get("vat", 25)
             update["current_bid"] = bid
             update["buyer_fee"] = round(bid * 0.10)
             update["total_now"] = round(bid * (1 + vat / 100) + round(bid * 0.10))
-            if res.get("ends_at"):
-                update["ends_at"] = res["ends_at"]
             if bid != doc.get("current_bid"):
                 hist = doc.get("price_history", []) + [{"t": now, "bid": bid}]
                 update["price_history"] = hist[-200:]
