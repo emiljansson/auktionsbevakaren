@@ -39,7 +39,14 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - Endpoints: GET /api/live/status, GET /api/live/auctions, POST /api/live/sync, POST /api/live/watch.
 - Frontend: vy-växlare "Live-flöde" / "Mina bevakningar"; live-grid auto-uppdateras var 10:e s, källstatus-chips, "Synka nu", "Bevaka" sparar till mina bevakningar.
 
+## Flera källor + per-sajt-crawler – uppdaterat 2026-06
+- Crawlern kör nu **per sajt**: varje aktiv sajt hämtar ett objekt var 10:e sekund och vilar sedan 4h efter en full pass (`CRAWL_REST_SECONDS`). Fångar `ends_at` (sluttid) per objekt.
+- **Aktiva adaptrar (ingen proxy): Klaravik, Budi, Fabeo** (riktiga titlar, priser, bilder, per-objekt-länkar; Budi även sluttid + antal bud).
+- Planerade (nåbara men kräver mer arbete): Retrade (SPA utan direktlänkar), Netauktion, Kronofogden, Tovek.
+- Kräver proxy/nyckel: PS Auction (renderande skrap-tjänst), Blinto (premium anti-bot).
+- Frontend live-kort visar nedräkning + antal bud; källstatus-chips speglar ovan.
+
 ## Nästa steg
-- Aktivera PS Auction via renderande skrap-API (ScrapingBee/ScraperAPI/Firecrawl) + nyckel
-- Bygg adaptrar för Netauktion, Retrade, Budi, Fabeo, Kronofogden (nåbara direkt)
-- Notiser när bud höjs / fyndlarm
+- Push vid stundande avslut via externt system (användaren fixar nyckel senare)
+- Adaptrar för Retrade/Netauktion/Kronofogden/Tovek
+- Rensa avslutade/inaktuella live-objekt (Budi roterar startsidan → DB växer)

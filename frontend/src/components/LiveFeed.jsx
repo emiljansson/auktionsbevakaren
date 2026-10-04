@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import { badgeClass, formatSEK } from "@/lib/sources";
+import { badgeClass, formatSEK, timeLeft } from "@/lib/sources";
 
 const STATUS_CHIP = {
   active: { cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30", label: "Aktiv" },
@@ -16,7 +16,9 @@ const STATUS_CHIP = {
   planned: { cls: "bg-slate-500/15 text-slate-400 border-slate-600/30", label: "Planerad" },
 };
 
-const LiveCard = ({ a, onWatch, watching }) => (
+const LiveCard = ({ a, onWatch, watching }) => {
+  const tl = timeLeft(a.ends_at);
+  return (
   <motion.div
     layout
     initial={{ opacity: 0, y: 10 }}
@@ -29,11 +31,16 @@ const LiveCard = ({ a, onWatch, watching }) => (
         onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1603816885871-c122a9ff8d40?w=600&q=80"; }} />
       <div className="absolute inset-0 bg-gradient-to-t from-[#111827] to-transparent" />
       <Badge className={`absolute left-2 top-2 border font-mono text-[10px] ${badgeClass(a.source)}`} style={{ backgroundColor: "rgba(11,15,25,0.65)" }}>{a.source}</Badge>
+      {tl && (
+        <div className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold backdrop-blur-md ${tl.ended ? "bg-slate-900/80 text-slate-400" : "bg-amber-500/90 text-slate-950"}`}>
+          {tl.ended ? "Avslutad" : `⏱ ${tl.label}`}
+        </div>
+      )}
     </div>
     <div className="flex flex-1 flex-col gap-2 p-3">
       <h4 className="line-clamp-2 text-sm font-semibold text-slate-100" title={a.title}>{a.title}</h4>
       <div className="mt-auto">
-        <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Aktuellt bud</p>
+        <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Aktuellt bud{a.bid_count ? ` · ${a.bid_count} bud` : ""}</p>
         <p className="font-heading text-lg font-bold text-amber-400">{formatSEK(a.current_bid)}</p>
       </div>
       <div className="flex items-center gap-2 pt-1">
@@ -48,7 +55,8 @@ const LiveCard = ({ a, onWatch, watching }) => (
       </div>
     </div>
   </motion.div>
-);
+  );
+};
 
 export const LiveFeed = () => {
   const [status, setStatus] = useState(null);

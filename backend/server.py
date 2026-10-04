@@ -232,7 +232,7 @@ async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, l
 
 @api_router.post("/live/sync")
 async def live_sync():
-    crawler.force_discovery = True
+    crawler.sync_now()
     return {"ok": True, "message": "Synkning startad"}
 
 
