@@ -77,6 +77,11 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - **PS Auction via ScrapingBee** (2026-06): Playwright-scrapern slutade fungera (AWS WAF `net::ERR_ABORTED`, 0 objekt). `ps_playwright.collect()` skrevs om till ScrapingBee (`premium_proxy=true` + `render_js` löser WAF): hämtar auktionsindex, filtrerar **pågående** auktioner (tid kvar, ej "Avslutad"), och parsar objektkort (h2-titel, cloudfront-bild, bud, antal bud, "Tid kvar" → ends_at). Cap: index + 10 auktioner/pass (~var 4:e h). Nu ~250 objekt. **Sökning funkar nu över alla källor** (t.ex. "såg" ger Blinto + PS Auction + Tovek m.fl.).
 - Testat via curl + screenshot (frontend visar Blinto-kort med rätt bilder/bud/nedräkning).
 
+## Sticky flik-meny + direkt-uppdatering av bevakningar – 2026-06 (testat iteration_8, 100%)
+- **Sticky meny**: flik-menyn (Live-flöde / Mina bevakningar, `data-testid="view-toggle"`) flyttad in i `<header className="sticky top-0 z-40">` som andra rad → förblir synlig vid scroll (verifierat y=64 desktop + mobil).
+- **Ny bevakning syns direkt**: `LiveFeed` får `onWatchAdded={load}` från App; `handleWatch` anropar det efter `api.liveWatch`, så App:s `auctions`+`stats` uppdateras utan omladdning. Dessutom reloadar App när man byter till 'watch'-vyn. Badge 3→4 och nya kort visas direkt (verifierat).
+- Kvar (låg prio, kosmetiskt): Tradera-bild-URL:er serveras via http:// → Mixed Content-varning i konsolen.
+
 ## PS Auction full trädgenomgång + budget-styrd hybrid – uppdaterat 2026-06
 - **Problem**: PS visade bara ett fåtal objekt; objekt som slutar 3-5 dagar fram (t.ex. "Cirkelsåg - Festool HK 55 EBQ-Plus" i auktionen "Överskottsgods elverktyg från Festool") saknades.
 - **Rotorsaker & fix**:
