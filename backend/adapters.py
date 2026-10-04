@@ -316,9 +316,102 @@ class KronofogdenAdapter:
         return None
 
 
+# ---- Tovek (Next.js Server Actions, no login needed) ----
+TOVEK_ACT_AUCTIONS = "7f8f949b85599ee0545667288ad781b5e46ed3822d"
+TOVEK_ACT_ITEMS = "7f88556099d83557895271d6f6135913755dfc8976"
+TOVEK_PAGE = "https://tovek.se/auktioner/pagaende-auktioner"
+
+
+async def _tovek_action(action_id, args):
+    headers = {
+        **HEADERS, "Origin": "https://tovek.se", "Referer": TOVEK_PAGE,
+        "Next-Action": action_id, "Content-Type": "text/plain;charset=UTF-8",
+        "Accept": "text/x-component",
+    }
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+        r = await c.post(TOVEK_PAGE, headers=headers, content=json.dumps(args))
+    idx = r.text.find("\n1:")
+    if idx < 0:
+        return {}
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(r.text[idx + 3:])
+        return obj
+    except Exception:
+        return {}
+
+
+def _slugify(t):
+    t = (t or "objekt").lower()
+    for a, b in {"å": "a", "ä": "a", "ö": "o", "é": "e", "ü": "u"}.items():
+        t = t.replace(a, b)
+    t = re.sub(r"[^a-z0-9]+", "-", t).strip("-")
+    return t or "objekt"
+
+
+def _tovek_ends(s):
+    if not s or str(s).startswith("0000"):
+        return None
+    m = re.match(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)", str(s))
+    if not m:
+        return None
+    t = m.group(2)
+    if len(t) == 5:
+        t += ":00"
+    return f"{m.group(1)}T{t}+02:00"
+
+
+class TovekAdapter:
+    source = "Tovek"
+
+    async def discover(self):
+        out, seen_parts = [], set()
+        for page in range(1, 4):
+            data = await _tovek_action(TOVEK_ACT_AUCTIONS, [{"partStatus": "running"}, page])
+            aucs = [a for a in data.get("auctions", []) if a.get("partStatus") == "running"]
+            if not aucs:
+                break
+            for a in aucs:
+                pid = a.get("partId")
+                if not pid or pid in seen_parts:
+                    continue
+                seen_parts.add(pid)
+                try:
+                    idata = await _tovek_action(TOVEK_ACT_ITEMS, [int(pid)])
+                except Exception:
+                    continue
+                for it in idata.get("auctionItems", []):
+                    if it.get("itemStatus") != "active":
+                        continue
+                    iid = it.get("itemId")
+                    if not iid:
+                        continue
+                    imgs = it.get("images") or []
+                    out.append({
+                        "source": self.source,
+                        "title": (it.get("itemTitle") or "Objekt").strip(),
+                        "image": imgs[0] if imgs else None,
+                        "current_bid": it.get("itemWinningBidValue") or 0,
+                        "ends_at": _tovek_ends(it.get("itemEndTime") or it.get("itemLastEndDate")),
+                        "url": f"https://tovek.se/auktion/rop/{_slugify(it.get('itemTitle'))}/{iid}",
+                    })
+            if len(out) >= 400:
+                break
+        return out
+
+    async def refresh_item(self, url):
+        html = (await _get(url)).replace('\\"', '"')
+        bm = re.search(r'"itemWinningBidValue":(\d+)', html)
+        em = re.search(r'"itemLastEndDate":"([^"]+)"', html) or re.search(r'"itemEndTime":"([^"]+)"', html)
+        bid = int(bm.group(1)) if bm else None
+        ends = _tovek_ends(em.group(1)) if em else None
+        if bid:
+            return {"current_bid": bid, "ends_at": ends}
+        return {"ends_at": ends} if ends else None
+
+
 # Active adapters (reliably scrapable server-side, with per-item links)
 ENABLED = [KlaravikAdapter(), BudiAdapter(), FabeoAdapter(),
-           RetradeAdapter(), NetauktionAdapter(), KronofogdenAdapter()]
+           RetradeAdapter(), NetauktionAdapter(), KronofogdenAdapter(), TovekAdapter()]
 
 # Reported to the UI so users understand coverage honestly
 SOURCE_STATUS = {
@@ -328,7 +421,7 @@ SOURCE_STATUS = {
     "Retrade": {"status": "active", "note": "Automatisk bevakning aktiv (per-objekt-länkar)."},
     "Netauktion": {"status": "active", "note": "Automatisk bevakning aktiv (objekt per auktion)."},
     "Kronofogden": {"status": "active", "note": "Listar aktuella försäljningar (budgivning sker externt)."},
-    "Tovek": {"status": "needs_key", "note": "JS-renderad (tom server-side) och bud kräver inloggning. Kräver renderande skrap-tjänst + inloggning – ej byggbar server-side nu."},
+    "Tovek": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid, moms & slagavgift)."},
     "PS Auction": {"status": "needs_key", "note": "Nåbar endast via renderande skrap-tjänst (Cloudflare). Lägg till SCRAPER_API_KEY för att aktivera."},
     "Blinto": {"status": "blocked", "note": "Anti-bot blockerar även renderande verktyg. Kräver premium-proxy."},
 }
