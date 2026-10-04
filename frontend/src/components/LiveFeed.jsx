@@ -72,7 +72,7 @@ const LiveCard = ({ a, onWatch, watching }) => {
   );
 };
 
-export const LiveFeed = () => {
+export const LiveFeed = ({ onWatchAdded }) => {
   const [status, setStatus] = useState(null);
   const [items, setItems] = useState([]);
   const [source, setSource] = useState("Alla");
@@ -131,6 +131,7 @@ export const LiveFeed = () => {
     try {
       await api.liveWatch(a.url);
       toast.success(`Bevakar "${a.title.slice(0, 40)}"`);
+      onWatchAdded?.();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Kunde inte bevaka");
     } finally {
