@@ -139,6 +139,10 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - Sökresultat varvar nu källorna (round-robin) så Blocket/Tradera-fastpris syns nära toppen istället för sist.
 - `sources.js`: Blocket tillagd med lime-badge. Verifierat via curl + skärmdump.
 
+## Blocket sök-precision fixad (2026-06)
+- Problem: `hela_sverige?q=moped` omdirigerade till `/mobility/search/mc` (hela MC-kategorin) och ignorerade nyckelordet → visade motorcyklar utan ordet "moped".
+- Fix: `blocket.py` använder nu `recommerce/forsale/search?q=` direkt (nyckelordsmatchar som Blocket-appen) + efterfiltrering som bara behåller annonser där alla sökord finns i kort-texten. Gamla felaktiga Blocket-docs rensade.
+
 ## Nästa steg (kvar)
 - AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.
