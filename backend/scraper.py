@@ -7,8 +7,10 @@ found, a realistic fallback record is produced and flagged scraped=False.
 import re
 import json
 import random
+import socket
+import ipaddress
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -161,6 +163,28 @@ def _build_record(url: str, data: dict, scraped: bool) -> dict:
     }
 
 
+def _is_blocked_ip(ip: str) -> bool:
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return True
+    return (a.is_private or a.is_loopback or a.is_link_local or a.is_reserved
+            or a.is_multicast or a.is_unspecified)
+
+
+def _assert_public_url(url: str):
+    """Block SSRF to internal/private hosts while still allowing any public URL."""
+    p = urlparse(url)
+    if p.scheme not in ("http", "https"):
+        raise ValueError("blocked scheme")
+    host = p.hostname
+    if not host:
+        raise ValueError("no host")
+    for info in socket.getaddrinfo(host, None):
+        if _is_blocked_ip(info[4][0]):
+            raise ValueError("blocked host")
+
+
 def scrape_auction(url: str = None, keyword: str = None) -> dict:
     """Synchronous scrape. Returns a normalised auction record."""
     if not url:
@@ -169,10 +193,21 @@ def scrape_auction(url: str = None, keyword: str = None) -> dict:
 
     source = detect_source(url)
     try:
-        with httpx.Client(headers=HEADERS, timeout=12, follow_redirects=True) as c:
-            r = c.get(url)
-            r.raise_for_status()
-            data = _extract(url, r.text)
+        with httpx.Client(headers=HEADERS, timeout=12, follow_redirects=False) as c:
+            cur, resp = url, None
+            for _ in range(4):  # validate the target and every redirect hop
+                _assert_public_url(cur)
+                r = c.get(cur)
+                loc = r.headers.get("location")
+                if r.is_redirect and loc:
+                    cur = urljoin(cur, loc)
+                    continue
+                resp = r
+                break
+            if resp is None:
+                raise ValueError("too many redirects")
+            resp.raise_for_status()
+            data = _extract(cur, resp.text)
             has_core = data.get("title") and data.get("current_bid")
             if has_core:
                 return _build_record(url, data, True)

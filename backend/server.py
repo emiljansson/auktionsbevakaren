@@ -1,8 +1,9 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import asyncio
 import logging
 import time
@@ -100,6 +101,27 @@ async def require_device(x_device_id: Optional[str] = Header(None)) -> str:
     return x_device_id
 
 
+# ---------- Lightweight per-IP rate limiting (in-memory, single instance) ----------
+_rate_buckets = {}
+
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limit(request: Request, name: str, limit: int, window: int):
+    key = (_client_ip(request), name)
+    now = time.time()
+    arr = [t for t in _rate_buckets.get(key, []) if now - t < window]
+    if len(arr) >= limit:
+        raise HTTPException(status_code=429, detail="För många förfrågningar – vänta en stund och försök igen.")
+    arr.append(now)
+    _rate_buckets[key] = arr
+
+
 # ---------- Push notifications (per-device, no login) ----------
 @api_router.get("/push/config")
 async def push_config():
@@ -114,19 +136,23 @@ async def push_config():
 
 
 @api_router.post("/push/register")
-async def push_register(payload: PushRegister, device_id: str = Depends(require_device)):
+async def push_register(payload: PushRegister, request: Request, device_id: str = Depends(require_device)):
+    _rate_limit(request, "push_register", 20, 60)
     if not commhub.enabled():
         raise HTTPException(status_code=503, detail="Push är inte konfigurerat.")
+    token = (payload.token or "").strip()
+    if not (20 <= len(token) <= 500):
+        raise HTTPException(status_code=400, detail="Ogiltig push-token.")
     first_device = await db.devices.count_documents({}) == 0
     try:
-        await commhub.register_token(payload.token, device_id, payload.platform or "web")
+        await commhub.register_token(token, device_id, payload.platform or "web")
     except Exception:
         logger.exception("push register")
         raise HTTPException(status_code=502, detail="Kunde inte registrera för notiser.")
     now = datetime.now(timezone.utc).isoformat()
     await db.devices.update_one(
         {"device_id": device_id},
-        {"$set": {"token": payload.token, "platform": payload.platform or "web", "updated_at": now},
+        {"$set": {"token": token, "platform": payload.platform or "web", "updated_at": now},
          "$setOnInsert": {"created_at": now}},
         upsert=True,
     )
@@ -157,7 +183,8 @@ async def get_sources():
 
 
 @api_router.post("/scrape/preview")
-async def scrape_preview(payload: WatchCreate):
+async def scrape_preview(payload: WatchCreate, request: Request):
+    _rate_limit(request, "scrape", 20, 60)
     if not payload.url and not payload.keyword:
         raise HTTPException(status_code=400, detail="Ange en URL eller ett sökord.")
     data = await asyncio.to_thread(scraper.scrape_auction, payload.url, payload.keyword)
@@ -207,15 +234,16 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
 
 
 @api_router.get("/auctions/{auction_id}", response_model=Auction)
-async def get_auction(auction_id: str):
-    doc = await db.auctions.find_one({"id": auction_id})
+async def get_auction(auction_id: str, device_id: str = Depends(require_device)):
+    doc = await db.auctions.find_one({"id": auction_id, "device_id": device_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     return Auction(**_clean(doc))
 
 
 @api_router.post("/auctions", response_model=Auction)
-async def create_auction(payload: WatchCreate):
+async def create_auction(payload: WatchCreate, request: Request, device_id: str = Depends(require_device)):
+    _rate_limit(request, "scrape", 20, 60)
     if not payload.url and not payload.keyword:
         raise HTTPException(status_code=400, detail="Ange en URL eller ett sökord.")
     data = await asyncio.to_thread(scraper.scrape_auction, payload.url, payload.keyword)
@@ -235,13 +263,14 @@ async def create_auction(payload: WatchCreate):
         scraped=data.get("scraped", False),
         bid_history=history,
     )
-    await db.auctions.insert_one(auction.model_dump())
+    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id})
     return auction
 
 
 @api_router.post("/auctions/{auction_id}/analyze", response_model=Auction)
-async def analyze_auction(auction_id: str):
-    doc = await db.auctions.find_one({"id": auction_id})
+async def analyze_auction(auction_id: str, request: Request, device_id: str = Depends(require_device)):
+    _rate_limit(request, "analyze", 30, 60)
+    doc = await db.auctions.find_one({"id": auction_id, "device_id": device_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     doc = _clean(doc)
@@ -249,9 +278,9 @@ async def analyze_auction(auction_id: str):
         val = await valuation.valuate(
             doc["title"], doc["current_bid"], doc["source"], doc["total_now"]
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Valuation failed")
-        raise HTTPException(status_code=502, detail=f"AI-analys misslyckades: {e}")
+        raise HTTPException(status_code=502, detail="AI-analysen misslyckades. Försök igen senare.")
     now = datetime.now(timezone.utc).isoformat()
     await db.auctions.update_one(
         {"id": auction_id}, {"$set": {"valuation": val, "updated_at": now}}
@@ -262,8 +291,9 @@ async def analyze_auction(auction_id: str):
 
 
 @api_router.post("/auctions/{auction_id}/refresh", response_model=Auction)
-async def refresh_auction(auction_id: str):
-    doc = await db.auctions.find_one({"id": auction_id})
+async def refresh_auction(auction_id: str, request: Request, device_id: str = Depends(require_device)):
+    _rate_limit(request, "scrape", 20, 60)
+    doc = await db.auctions.find_one({"id": auction_id, "device_id": device_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     doc = _clean(doc)
@@ -335,10 +365,12 @@ async def live_status():
 
 
 @api_router.get("/live/auctions")
-async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, limit: int = 120):
+async def live_auctions(request: Request, source: Optional[str] = None, q: Optional[str] = None, limit: int = 120):
+    limit = max(1, min(limit, 500))
     # On search, augment the feed with live Tradera + Blocket results (not background-crawled).
     if q and len((q or "").strip()) >= 2:
-        key = q.strip().lower()
+        _rate_limit(request, "search", 15, 20)  # block burst searches, keep normal polling free
+        key = q.strip().lower()[:100]
         if time.time() - _tradera_seen.get(key, 0) > 120:
             try:
                 for it in await tradera.search(q):
@@ -361,14 +393,15 @@ async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, l
     elif not q:
         query["source"] = {"$nin": ["Tradera", "Blocket"]}  # on-demand sources only appear on search
     if q:
-        key = q.strip().lower()
+        key = q.strip().lower()[:100]
         # Match on title OR items specifically fetched for this search (Tradera/Blocket
         # titles don't always contain the query term, e.g. "Yamaha" for "moped").
+        # re.escape prevents ReDoS / regex injection via the user query.
         query["$or"] = [
-            {"title": {"$regex": q, "$options": "i"}},
+            {"title": {"$regex": re.escape(q.strip()[:100]), "$options": "i"}},
             {"search_q": key},
         ]
-    docs = await db.live_auctions.find(query, {"_id": 0}).to_list(20000)
+    docs = await db.live_auctions.find(query, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     far = datetime.max.replace(tzinfo=timezone.utc)
 
@@ -443,10 +476,11 @@ async def watch_live(payload: WatchCreate, device_id: str = Depends(require_devi
 
 
 app.include_router(api_router)
+_cors_origins = os.environ.get('CORS_ORIGINS', '*').split(',')
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_credentials=False,  # identity is a custom X-Device-Id header, not cookies
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
