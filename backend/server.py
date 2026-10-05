@@ -18,6 +18,7 @@ load_dotenv(ROOT_DIR / '.env')
 import scraper
 import valuation
 import tradera
+import blocket
 import commhub
 from fastapi import Header
 from crawler import Crawler
@@ -35,6 +36,7 @@ logging.basicConfig(level=logging.INFO)
 
 SOURCE_LIST = list(scraper.SOURCES.values())
 _tradera_seen = {}  # q(lower) -> last upsert timestamp (throttles Tradera fetch)
+_blocket_seen = {}  # q(lower) -> last upsert timestamp (throttles Blocket fetch)
 
 
 # ---------- Models ----------
@@ -334,23 +336,38 @@ async def live_status():
 
 @api_router.get("/live/auctions")
 async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, limit: int = 120):
-    # On search, augment the feed with live Tradera results (not background-crawled).
+    # On search, augment the feed with live Tradera + Blocket results (not background-crawled).
     if q and len((q or "").strip()) >= 2:
         key = q.strip().lower()
         if time.time() - _tradera_seen.get(key, 0) > 120:
             try:
                 for it in await tradera.search(q):
+                    it["search_q"] = key
                     await crawler._upsert(it)
                 _tradera_seen[key] = time.time()
             except Exception:
                 logger.exception("Tradera augment failed")
+        if time.time() - _blocket_seen.get(key, 0) > 120:
+            try:
+                for it in await blocket.search(q):
+                    it["search_q"] = key
+                    await crawler._upsert(it)
+                _blocket_seen[key] = time.time()
+            except Exception:
+                logger.exception("Blocket augment failed")
     query = {}
     if source and source != "Alla":
         query["source"] = source
     elif not q:
-        query["source"] = {"$ne": "Tradera"}  # Tradera only appears on search
+        query["source"] = {"$nin": ["Tradera", "Blocket"]}  # on-demand sources only appear on search
     if q:
-        query["title"] = {"$regex": q, "$options": "i"}
+        key = q.strip().lower()
+        # Match on title OR items specifically fetched for this search (Tradera/Blocket
+        # titles don't always contain the query term, e.g. "Yamaha" for "moped").
+        query["$or"] = [
+            {"title": {"$regex": q, "$options": "i"}},
+            {"search_q": key},
+        ]
     docs = await db.live_auctions.find(query, {"_id": 0}).to_list(20000)
     now = datetime.now(timezone.utc)
     far = datetime.max.replace(tzinfo=timezone.utc)
@@ -367,8 +384,22 @@ async def live_auctions(source: Optional[str] = None, q: Optional[str] = None, l
 
     # Keep only ongoing (no end time, or end time in the future).
     live = [d for d in docs if (end_dt(d) is None or end_dt(d) > now)]
-    # Stable order: soonest-ending first, items without an end time last.
     live.sort(key=lambda d: (end_dt(d) is None, end_dt(d) or far))
+    if q:
+        # On search, round-robin across sources so on-demand fixed-price results
+        # (Blocket, Tradera "köp nu") surface near the top instead of being
+        # buried below every auction.
+        from collections import OrderedDict
+        groups = OrderedDict()
+        for d in live:
+            groups.setdefault(d["source"], []).append(d)
+        merged, i = [], 0
+        while len(merged) < len(live):
+            for g in groups.values():
+                if i < len(g):
+                    merged.append(g[i])
+            i += 1
+        live = merged
     return live[:limit]
 
 

@@ -1,6 +1,6 @@
 export const SOURCES = [
   "PS Auction", "Klaravik", "Blinto", "Tovek", "Netauktion",
-  "Retrade", "Budi", "Fabeo", "Tradera",
+  "Retrade", "Budi", "Fabeo", "Tradera", "Blocket",
 ];
 
 export const SOURCE_BADGES = {
@@ -13,6 +13,7 @@ export const SOURCE_BADGES = {
   "Budi": "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
   "Fabeo": "bg-orange-500/10 text-orange-400 border-orange-500/30",
   "Tradera": "bg-pink-500/10 text-pink-400 border-pink-500/30",
+  "Blocket": "bg-lime-500/10 text-lime-400 border-lime-500/30",
   "Kronofogden": "bg-slate-500/10 text-slate-300 border-slate-500/30",
   "Okänd källa": "bg-slate-500/10 text-slate-300 border-slate-500/30",
 };

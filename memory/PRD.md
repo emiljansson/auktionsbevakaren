@@ -132,6 +132,13 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - `GET /auctions` sorterar nu med **minst tid kvar överst** (ends_at stigande; objekt utan sluttid sist).
 - `POST /live/watch` hindrar **dubbletter** per enhet (409 "Du bevakar redan denna auktion."). Unikt index `(device_id, url)` + befintliga dubbletter rensade.
 
+## Blocket som on-demand sökkälla (2026-06)
+- Nytt `backend/blocket.py` (speglar `tradera.py`): hämtar blocket.se/annonser-sök på begäran (ingen inloggning), parsar `<article>`-korten (titel, pris, bild, item-länk). Fastpris-annonser → `fixed_price=True`, `vat=0`, inga bud/avgift/sluttid.
+- Integrerat i `GET /live/auctions`: augmenteras vid sökning (throttlas 120s via `_blocket_seen`), source "Blocket" exkluderas ur icke-sök-flödet (som Tradera).
+- On-demand-objekt taggas med `search_q` (persistas i `_upsert`) så de visas även när titeln inte innehåller sökordet (t.ex. "Yamaha" för "moped").
+- Sökresultat varvar nu källorna (round-robin) så Blocket/Tradera-fastpris syns nära toppen istället för sist.
+- `sources.js`: Blocket tillagd med lime-badge. Verifierat via curl + skärmdump.
+
 ## Nästa steg (kvar)
 - AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.

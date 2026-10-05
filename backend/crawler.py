@@ -295,6 +295,8 @@ class Crawler:
                 update["bid_count"] = it["bid_count"]
             if it.get("starting_price") is not None:
                 update["starting_price"] = it["starting_price"]
+            if it.get("search_q"):
+                update["search_q"] = it["search_q"]
             if bid and bid != existing.get("current_bid"):
                 hist = existing.get("price_history", []) + [{"t": now, "bid": bid}]
                 update["price_history"] = hist[-200:]
@@ -309,6 +311,7 @@ class Crawler:
                 "fee_inputs": fee_inputs,
                 "ends_at": it.get("ends_at"), "bid_count": it.get("bid_count"),
                 "starting_price": it.get("starting_price"), "fixed_price": fixed_price,
+                "search_q": it.get("search_q"),
                 "first_seen": now, "last_seen": now, "last_checked": now,
                 "price_history": [{"t": now, "bid": bid}] if bid else [],
             })
