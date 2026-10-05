@@ -99,21 +99,68 @@ class LiveAnalyzeReq(BaseModel):
     url: str
 
 
+def _key_tokens(title: str):
+    """Classify a title's tokens so comparisons lock onto the exact model:
+      - model: real model codes (letters+digits, >=3 chars, e.g. R730, FH16,
+        EC220, S60) — these are brand-specific and the key discriminator.
+      - brand: ALL-CAPS makes (SCANIA, VOLVO, GMC).
+      - weak: years/quantities (2019), axle configs (8x4), short codes (V8).
+    Generic category words ('Lastbil', 'schaktflak', 'med') are ignored."""
+    model, brand, weak = [], [], []
+    for t in re.findall(r"[A-Za-z0-9ÅÄÖåäö]+", title or ""):
+        if len(t) < 2:
+            continue
+        tl = t.lower()
+        has_alpha = any(c.isalpha() for c in t)
+        has_digit = any(c.isdigit() for c in t)
+        if re.fullmatch(r"\d+x\d+", tl):
+            weak.append(tl)
+        elif has_alpha and has_digit and len(t) >= 3:
+            model.append(tl)
+        elif has_digit:
+            weak.append(tl)
+        elif t.isupper():
+            brand.append(tl)
+    return model, brand, weak
+
+
 async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8):
-    """Find real sold auctions similar to `title` (MongoDB text search on
-    sold_items.title), returning them as grounding comparables for valuation."""
+    """Find real sold auctions that match `title` NARROWLY. We text-search a broad
+    candidate pool, then require each candidate to share the exact model code
+    (or the brand when no model code exists), so 'Lastbil med schaktflak 8x4
+    SCANIA R730' only matches other SCANIA R730 trucks — never every lastbil."""
     if not title or not title.strip():
         return []
+    model, brand, weak = _key_tokens(title)
+    terms = model + brand + weak
+    search = " ".join(terms) if terms else title
     try:
         cursor = db.sold_items.find(
-            {"$text": {"$search": title}},
+            {"$text": {"$search": search}},
             {"score": {"$meta": "textScore"}, "_id": 0, "title": 1, "source": 1,
              "final_bid": 1, "total_final": 1, "bid_count": 1, "ends_at": 1},
-        ).sort([("score", {"$meta": "textScore"})]).limit(limit)
-        return await cursor.to_list(limit)
+        ).sort([("score", {"$meta": "textScore"})]).limit(80)
+        cands = await cursor.to_list(80)
     except Exception:
         logger.exception("find_comps failed")
         return []
+    if not model and not brand:
+        return cands[:limit]
+    model_set, brand_set, weak_set = set(model), set(brand), set(weak)
+    scored = []
+    for c in cands:
+        cm, cb, cw = _key_tokens(c.get("title", ""))
+        shared_model = model_set & set(cm)
+        shared_brand = brand_set & set(cb)
+        shared_weak = weak_set & set(cw)
+        if model_set:
+            if not shared_model:
+                continue
+        elif not shared_brand:
+            continue
+        scored.append((len(shared_model) * 4 + len(shared_brand) * 2 + len(shared_weak), c))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [c for _, c in scored[:limit]]
 
 
 async def require_device(x_device_id: Optional[str] = Header(None)) -> str:
