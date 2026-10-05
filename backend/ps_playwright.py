@@ -47,31 +47,43 @@ _TIME_RE = re.compile(r"\d+[DdHhMm]")
 
 _last_full = 0.0
 _last_soon = 0.0
-_STATE_FILE = "/app/.ps_state.json"  # outside the uvicorn --reload watch dir
+
+# Budget gate timestamps live in MongoDB (collection `crawler_state`, _id
+# "ps_auction") so the 72h/24h crawl cadence survives pod restarts/redeploys
+# where a local file would be lost. set_db() is called once by the crawler.
+_db = None
+_STATE_ID = "ps_auction"
 
 
-def _load_state():
+def set_db(db):
+    global _db
+    _db = db
+
+
+async def _load_state():
     global _last_full, _last_soon
+    if _db is None:
+        return
     try:
-        import json
-        with open(_STATE_FILE) as f:
-            d = json.load(f)
-        _last_full = float(d.get("last_full", 0))
-        _last_soon = float(d.get("last_soon", 0))
+        doc = await _db.crawler_state.find_one({"_id": _STATE_ID})
+        if doc:
+            _last_full = float(doc.get("last_full", 0))
+            _last_soon = float(doc.get("last_soon", 0))
     except Exception:
-        pass
+        logger.exception("PS state load failed")
 
 
-def _save_state():
+async def _save_state():
+    if _db is None:
+        return
     try:
-        import json
-        with open(_STATE_FILE, "w") as f:
-            json.dump({"last_full": _last_full, "last_soon": _last_soon}, f)
+        await _db.crawler_state.update_one(
+            {"_id": _STATE_ID},
+            {"$set": {"last_full": _last_full, "last_soon": _last_soon}},
+            upsert=True,
+        )
     except Exception:
-        pass
-
-
-_load_state()
+        logger.exception("PS state save failed")
 
 
 async def _bee(url):
@@ -225,5 +237,5 @@ async def collect():
         _last_soon = now
     else:
         _last_full = _last_soon = now
-    _save_state()
+    await _save_state()
     return results[:MAX_ITEMS]

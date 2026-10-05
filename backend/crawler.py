@@ -171,6 +171,8 @@ class Crawler:
         never blocks the other sites. collect() is time-gated internally and
         returns [] cheaply when no full/soon pass is due."""
         import ps_playwright
+        ps_playwright.set_db(self.db)
+        await ps_playwright._load_state()
         await asyncio.sleep(5)
         while self.running:
             try:

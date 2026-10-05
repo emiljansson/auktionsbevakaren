@@ -171,4 +171,10 @@ Användarfråga: "9297 objekt och stiger – riktigt eller loopar indexeringen?"
 - AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.
 - Prisfilter/sortering i live-flödet.
-- Migrera `ps_playwright.py` ScrapingBee-budget från lokal fil (`.ps_state.json`) till MongoDB.
+
+## PS Auction-budget i MongoDB (2026-06)
+Flyttade ScrapingBee-budgetgaten från lokal fil (`/app/.ps_state.json`, försvinner vid pod-omstart/redeploy) till MongoDB så cadencen (72h full / 24h soon) överlever omstarter:
+- `ps_playwright.py`: `_load_state`/`_save_state` är nu async och läser/skriver `crawler_state`-kollektionen (`_id="ps_auction"`, fält `last_full`/`last_soon`). Ny `set_db(db)`. Import-tidens filladdning borttagen.
+- `crawler.py _ps_loop`: anropar `ps_playwright.set_db(self.db)` + `await _load_state()` innan loopen.
+- Befintliga filvärden migrerades in i DB (gaten förblev armerad, ålder ~12h) och `.ps_state.json` togs bort.
+- Verifierat: state laddas från DB, gaten returnerar korrekt `[]` (ingen oväntad dyr full-crawl), backend frisk, inga fel.
