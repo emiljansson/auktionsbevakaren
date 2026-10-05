@@ -12,6 +12,7 @@ links (Retrade) are reported in SOURCE_STATUS and stay disabled.
 import os
 import re
 import json
+import asyncio
 import logging
 import html as _html
 from datetime import datetime, timezone, timedelta
@@ -136,9 +137,10 @@ class KlaravikAdapter:
         except Exception:
             return None
 
-    async def discover(self):
-        soup = BeautifulSoup(await _get(self.listing_url), "lxml")
-        il = _ld_type(soup, "ItemList")
+    @staticmethod
+    def _page_items(html):
+        """Parse one listing page's JSON-LD ItemList into item dicts."""
+        il = _ld_type(BeautifulSoup(html, "lxml"), "ItemList")
         out = []
         for el in (il or {}).get("itemListElement", []):
             item = el.get("item", {}) if isinstance(el, dict) else {}
@@ -146,9 +148,32 @@ class KlaravikAdapter:
             if not name or not url:
                 continue
             out.append({
-                "source": self.source, "title": name, "image": item.get("image"),
+                "source": "Klaravik", "title": name, "image": item.get("image"),
                 "current_bid": _to_int((item.get("offers") or {}).get("price")) or 0, "url": url,
             })
+        return out
+
+    async def discover(self):
+        """Klaravik paginates its full catalogue via ?curpage=N (60 objects per
+        page). Page 1 exposes the highest curpage link. We fetch pages one at a
+        time with a short pause so the burst never trips Klaravik's anti-bot."""
+        first = await _get(self.listing_url + "?curpage=1")
+        pages = [int(m) for m in re.findall(r"curpage=(\d+)", first)]
+        last = min(max(pages) if pages else 1, 120)
+        out, seen = [], set()
+
+        def collect(html):
+            for it in self._page_items(html):
+                if it["url"] not in seen:
+                    seen.add(it["url"])
+                    out.append(it)
+        collect(first)
+        for p in range(2, last + 1):
+            await asyncio.sleep(0.3)
+            try:
+                collect(await _get(f"{self.listing_url}?curpage={p}"))
+            except Exception:
+                continue
         return out
 
     async def refresh_item(self, url):
@@ -286,42 +311,88 @@ class RetradeAdapter:
     source = "Retrade"
     listing_url = "https://www.retrade.eu/sv"
 
+    @staticmethod
+    def _nuxt(html):
+        """Retrade is a Nuxt SSR app: every listing/detail page embeds a
+        __NUXT_DATA__ payload (an index-referenced flat array). We resolve the
+        auction objects (id, heading, highestBid, currency, image, place,
+        auctionEnd) and the pagination block out of it."""
+        tag = BeautifulSoup(html, "lxml").find("script", id="__NUXT_DATA__")
+        if not tag or not tag.string:
+            return [], None
+        try:
+            arr = json.loads(tag.string)
+        except Exception:
+            return [], None
+
+        def d(i):
+            return arr[i] if isinstance(i, int) and 0 <= i < len(arr) else i
+        items, total_pages = [], None
+        for e in arr:
+            if isinstance(e, dict) and {"id", "heading", "currency"} <= set(e.keys()):
+                items.append({k: d(v) for k, v in e.items()})
+            elif isinstance(e, dict) and "totalPages" in e and "currentPage" in e:
+                total_pages = d(e["totalPages"])
+        return items, total_pages
+
+    def _to_item(self, it):
+        iid = it.get("id")
+        if not iid:
+            return None
+        return {
+            "source": self.source,
+            "title": (it.get("heading") or "Retrade-objekt").strip(),
+            "image": it.get("image"),
+            "current_bid": _to_int(it.get("highestBid")) or 0,
+            "ends_at": it.get("auctionEnd"),
+            "url": f"https://www.retrade.eu/sv/auction/{iid}",
+        }
+
     async def discover(self):
-        soup = BeautifulSoup(await _get(self.listing_url), "lxml")
-        cards = soup.select('a[href*="/auction/"]')
-        il = _ld_type(soup, "ItemList")
-        items = (il or {}).get("itemListElement", [])
-        out = []
-        for i, a in enumerate(cards):
-            href = a.get("href", "")
-            if not re.search(r"/auction/\d+", href):
+        """The default /sv listing is Nordic (SEK/DKK/NOK); we keep only the
+        Swedish objects (currency == SEK) and paginate ?page=N across the whole
+        Swedish catalogue."""
+        first = await _get(self.listing_url + "?page=1")
+        raw, total = self._nuxt(first)
+        total = min(total or 1, 30)
+        if total > 1:
+            sem = asyncio.Semaphore(5)
+
+            async def fetch(p):
+                async with sem:
+                    try:
+                        return await _get(f"{self.listing_url}?page={p}")
+                    except Exception:
+                        return None
+            for h in await asyncio.gather(*[fetch(p) for p in range(2, total + 1)]):
+                if h:
+                    raw += self._nuxt(h)[0]
+        out, seen = [], set()
+        for it in raw:
+            if it.get("currency") != "SEK":
                 continue
-            url = "https://www.retrade.eu" + href if href.startswith("/") else href
-            img = a.find("img")
-            title = (img.get("alt") if img else None) or "Retrade-objekt"
-            image = img.get("src") if img else None
-            price, ends = 0, None
-            if i < len(items):
-                it = items[i].get("item", {}) if isinstance(items[i], dict) else {}
-                p, ends = _offer_price(it)
-                price = p or 0
-                if it.get("name"):
-                    title = it["name"]
-                if it.get("image"):
-                    image = it["image"]
-            out.append({"source": self.source, "title": title, "image": image,
-                        "current_bid": price, "ends_at": ends, "url": url})
+            if it.get("id") in seen:
+                continue
+            seen.add(it.get("id"))
+            d = self._to_item(it)
+            if d:
+                out.append(d)
         return out
 
     async def refresh_item(self, url):
-        soup = BeautifulSoup(await _get(url), "lxml")
-        prod = _ld_type(soup, "Product")
-        if prod:
-            price, valid = _offer_price(prod)
-            if price:
-                return {"current_bid": price, "ends_at": valid}
-        price = _price_from_text(soup.get_text(" ", strip=True))
-        return {"current_bid": price} if price else None
+        raw, _ = self._nuxt(await _get(url))
+        m = re.search(r"/auction/(\d+)", url)
+        iid = m.group(1) if m else None
+        cand = next((it for it in raw if str(it.get("id")) == iid), None) or (raw[0] if raw else None)
+        if not cand:
+            return None
+        res = {}
+        bid = _to_int(cand.get("highestBid"))
+        if bid:
+            res["current_bid"] = bid
+        if cand.get("auctionEnd"):
+            res["ends_at"] = cand["auctionEnd"]
+        return res or None
 
 
 class NetauktionAdapter:

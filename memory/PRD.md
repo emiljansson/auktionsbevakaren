@@ -160,7 +160,15 @@ Löste audit-fynden UTAN att begränsa publik funktion, plus spärr mot sök-flo
 - OBS skalning: rate-limitern är per-process (OK för en instans); horisontell skalning kräver Redis-backad limiter.
 - Produktion: fixarna gäller koden – publicera om (Re-publish) för att få dem live, och lägg till COMMHUB-nycklarna i Secrets.
 
+## Djuphämtning Klaravik/Retrade + städning (2026-06)
+Användarfråga: "9297 objekt och stiger – riktigt eller loopar indexeringen?" → Svar: **riktigt, ingen loop** (alla URL:er unika, 0 dubbletter). Ökningen kom från (a) bakgrundscrawlern + (b) on-demand sökträffar (Tradera/Blocket, search_q) som aldrig städades. Åtgärdat enligt användarens val (alla tre rekommenderade):
+- **Klaravik djuphämtning** (`adapters.py`): `discover()` paginerar nu hela katalogen via `?curpage=N` (60 objekt/sida, upp till 120 sidor), sekventiellt med 0,3s paus för att inte trigga anti-bot (403). Resultat: **64 → ~1959 objekt**. Parsar JSON-LD ItemList per sida, dedupe på URL.
+- **Retrade djuphämtning + svenskt filter** (`adapters.py`): default-listan `/sv` är nordisk (SEK/DKK/NOK). Ny `discover()` läser inline `__NUXT_DATA__`-payloaden, paginerar `?page=N` och behåller **endast currency == SEK** (= exakt 159 = Retrades sv-facet). Varje objekt får titel, bild, aktuellt bud (highestBid), sluttid (auctionEnd) och URL `/sv/auction/<id>`. `refresh_item` läser samma payload på detaljsidan.
+- **Auto-städning av sökträffar** (`crawler.py _cleanup`): tar nu även bort `search_q`-dokument vars `last_seen` är > 24h (stale/engångssökningar + testskräp försvinner av sig själva). Avslutade auktioner (ends_at passerat) rensas som tidigare – bekräftat fungerande.
+- Verifierat: adapter-körning (Klaravik 1959, Retrade 159 alla med ends_at), live-API curl, crawler-loggar (curpage 1..19 → 200 OK, inga 403 med sekventiell hämtning).
+
 ## Nästa steg (kvar)
 - AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.
 - Prisfilter/sortering i live-flödet.
+- Migrera `ps_playwright.py` ScrapingBee-budget från lokal fil (`.ps_state.json`) till MongoDB.

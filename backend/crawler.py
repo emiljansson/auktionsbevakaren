@@ -12,7 +12,7 @@ auctions nearing their close.
 import os
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import adapters
 
@@ -199,7 +199,9 @@ class Crawler:
             await asyncio.sleep(INTERVAL)
 
     async def _cleanup(self):
-        """Remove live auctions whose end time has passed, so only ongoing ones show."""
+        """Keep the live feed fresh: drop auctions whose end time has passed, and
+        purge on-demand search results (Tradera/Blocket, tagged with search_q)
+        that haven't been re-seen for 24h so stale/one-off searches don't pile up."""
         now = _now()
         docs = await self.db.live_auctions.find(
             {"ends_at": {"$ne": None}}, {"url": 1, "ends_at": 1}
@@ -219,6 +221,12 @@ class Crawler:
             for st in self.states:
                 st.queue = [u for u in st.queue if u not in set(dead)]
             logger.info("Cleanup removed %s ended auctions", len(dead))
+        cutoff = (now - timedelta(hours=24)).isoformat()
+        stale = await self.db.live_auctions.delete_many(
+            {"search_q": {"$nin": [None, ""]}, "last_seen": {"$lt": cutoff}}
+        )
+        if stale.deleted_count:
+            logger.info("Cleanup removed %s stale search results", stale.deleted_count)
 
     async def _step(self, st):
         try:
