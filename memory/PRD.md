@@ -222,3 +222,10 @@ Flyttade ScrapingBee-budgetgaten från lokal fil (`/app/.ps_state.json`, försvi
 - `crawler.py _ps_loop`: anropar `ps_playwright.set_db(self.db)` + `await _load_state()` innan loopen.
 - Befintliga filvärden migrerades in i DB (gaten förblev armerad, ålder ~12h) och `.ps_state.json` togs bort.
 - Verifierat: state laddas från DB, gaten returnerar korrekt `[]` (ingen oväntad dyr full-crawl), backend frisk, inga fel.
+
+## Fix: radera felaktiga AI-referensobjekt (soptunnan) (2026-06)
+Buggrapport: "kan inte ta bort detta objekt"-toast vid klick på soptunnan (ex. Veteranbil VOLVO 145 De Luxe).
+- Grundorsak: cachade AI-värderingar skapade med äldre kod saknade `url` på `sold_comparables`; frontendens delete-guard (`if (!c.url)`) blockerade då raderingen direkt. Nuvarande kod sparar `url` korrekt – endast gamla 24h-cacher var trasiga.
+- Åtgärd 1 (engångsrensning): nollställde `valuation`/`valuation_at` på live/auctions-dokument vars `sold_comparables` saknade `url`, så nästa analys räknas om med `url`. Verifierat: Volvo 145-analys ger nu 6 comps alla med `url`.
+- Åtgärd 2 (robust radering): `DeleteSoldReq.url` nu optional + `title`/`source`; `DELETE /api/sold-items` raderar på `url` om den finns, annars `title`(+`source`), annars 400. Frontend `deleteSoldItem(comp)` + `handleRemoveComp` faller tillbaka på titel+källa och nyckar `removed`/loading på `url||title`.
+- Verifierat (curl): delete via url → deleted:1, via title+source → deleted:1, utan identifierare → 400.

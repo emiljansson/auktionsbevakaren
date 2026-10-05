@@ -27,7 +27,7 @@ export const api = {
   liveSync: () => axios.post(`${API}/live/sync`).then((r) => r.data),
   liveWatch: (url) => axios.post(`${API}/live/watch`, { url }).then((r) => r.data),
   liveAnalyze: (url) => axios.post(`${API}/live/analyze`, { url }).then((r) => r.data),
-  deleteSoldItem: (url) => axios.delete(`${API}/sold-items`, { data: { url } }).then((r) => r.data),
+  deleteSoldItem: (comp) => axios.delete(`${API}/sold-items`, { data: typeof comp === "string" ? { url: comp } : comp }).then((r) => r.data),
   pushStatus: () => axios.get(`${API}/push/status`).then((r) => r.data),
   kwList: () => axios.get(`${API}/keyword-watches`).then((r) => r.data),
   kwCreate: (keyword) => axios.post(`${API}/keyword-watches`, { keyword }).then((r) => r.data),

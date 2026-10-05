@@ -47,17 +47,18 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
     if (!n) return null;
     return n % 2 ? s[(n - 1) / 2] : Math.round((s[n / 2 - 1] + s[n / 2]) / 2);
   };
-  const comps = (val?.sold_comparables || []).filter((c) => !removed.has(c.url));
+  const comps = (val?.sold_comparables || []).filter((c) => !removed.has(c.url || c.title));
   const finals = comps.map((c) => c.final_bid).filter((x) => x > 0);
   const soldSummary = finals.length
     ? { count: finals.length, median_final: _median(finals), min_final: Math.min(...finals), max_final: Math.max(...finals) }
     : null;
   const handleRemoveComp = async (c) => {
-    if (!c.url) { toast.error("Kan inte ta bort detta objekt"); return; }
-    setRemoving(c.url);
+    const key = c.url || c.title;
+    if (!key) { toast.error("Kan inte ta bort detta objekt"); return; }
+    setRemoving(key);
     try {
-      await api.deleteSoldItem(c.url);
-      setRemoved((prev) => new Set(prev).add(c.url));
+      await api.deleteSoldItem(c.url ? { url: c.url } : { title: c.title, source: c.source });
+      setRemoved((prev) => new Set(prev).add(key));
       toast.success("Referensobjekt borttaget – används inte längre vid värdering");
     } catch {
       toast.error("Kunde inte ta bort referensobjektet");
@@ -224,12 +225,12 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                         <span className="font-semibold text-emerald-300">{formatSEK(c.final_bid)}</span>
                         <button
                           onClick={() => handleRemoveComp(c)}
-                          disabled={removing === c.url}
-                          data-testid={`remove-comp-${encodeURIComponent(c.url || "").slice(-16)}`}
+                          disabled={removing === (c.url || c.title)}
+                          data-testid={`remove-comp-${encodeURIComponent(c.url || c.title || "").slice(-16)}`}
                           title="Ta bort felaktigt referensobjekt"
                           className="shrink-0 rounded-md p-1.5 text-slate-500 transition hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
                         >
-                          {removing === c.url ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                          {removing === (c.url || c.title) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                         </button>
                       </div>
                     ))}

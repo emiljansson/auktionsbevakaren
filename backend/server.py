@@ -104,7 +104,9 @@ class KeywordWatchCreate(BaseModel):
 
 
 class DeleteSoldReq(BaseModel):
-    url: str
+    url: Optional[str] = None
+    title: Optional[str] = None
+    source: Optional[str] = None
 
 
 def _key_tokens(title: str):
@@ -667,8 +669,17 @@ async def delete_keyword_watch(wid: str, device_id: str = Depends(require_device
 @api_router.delete("/sold-items")
 async def delete_sold_item(payload: DeleteSoldReq, device_id: str = Depends(require_device)):
     """Remove a bad/mismatched sold reference so it is no longer used as a price
-    comparable in valuations."""
-    res = await db.sold_items.delete_one({"url": payload.url})
+    comparable in valuations. Prefer the exact url; fall back to title (+source)
+    for legacy comparables cached before url was tracked."""
+    if payload.url:
+        q = {"url": payload.url}
+    elif payload.title:
+        q = {"title": payload.title}
+        if payload.source:
+            q["source"] = payload.source
+    else:
+        raise HTTPException(status_code=400, detail="Saknar identifierare för objektet.")
+    res = await db.sold_items.delete_many(q)
     return {"ok": True, "deleted": res.deleted_count}
 
 
