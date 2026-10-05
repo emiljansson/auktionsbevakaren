@@ -437,7 +437,8 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
 
 
 @api_router.post("/live/sync")
-async def live_sync():
+async def live_sync(request: Request):
+    _rate_limit(request, "sync", 5, 60)
     crawler.sync_now()
     return {"ok": True, "message": "Synkning startad"}
 

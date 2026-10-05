@@ -1,0 +1,35 @@
+{
+  "summary": "Backend-only security hardening verification. 23/23 pytest cases in test_security_hardening.py pass against the preview backend. Verified: normal live feed + source filter + sort order (soonest ends first by parsed datetime, not string), regex-escaped search still works for 'cykel'/'moped'/special chars '()/.+/[]', Blocket moped results are post-filtered (only moped titles returned), per-device isolation via X-Device-Id (no header -> []), push-gate 403 before registration + 400 on short token, successful registration unlocks POST /api/live/watch (200), duplicate watch 409, BOLA authorization enforced on GET/refresh/analyze/DELETE /api/auctions/{id} (devB -> 404 on all four, devA succeeds, analyze returned 200 or 502 as allowed), SSRF guard blocks 169.254.169.254 and 127.0.0.1:8001 (scraped=false fallback, no internal leakage) while example.com still returns 200, and parallel burst of 25 unique-query search requests triggered 429s while sequential polling of /api/live/auctions (no q) is NOT rate-limited.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_security_hardening.py",
+    "/app/test_reports/pytest/security_hardening.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py: _rate_limit is in-memory per process, keyed on first X-Forwarded-For IP. Fine for single preview instance; document that horizontal scaling will need Redis-backed limiter.",
+    "server.py: POST /api/live/sync (line 439) is still exposed and is unauthenticated/unrate-limited; previous iteration flagged it as dead after UI removal. Consider deleting or at least adding _rate_limit to reduce surface area.",
+    "server.py: push/register validation length is 20..500 chars; token 'dummy-fcm-token-abcdefgh1234' from the request plan is exactly 29 chars so it passes. Good.",
+    "scraper.py _assert_public_url only validates scheme http/https and blocks private/loopback/link-local/reserved/multicast/unspecified via getaddrinfo. DNS-rebinding is partially mitigated by re-asserting on each redirect hop in scrape_auction. Good.",
+    "live_auctions regex escaping (re.escape on q[:100]) correctly prevents ReDoS/regex injection; verified with '(cykel)', 'a.b', 'c+d', '[test]' queries all returning 200.",
+    "watch_live: push-gate + unique index on (device_id, url) is the right defense-in-depth for dedupe (409 via code path, DB index as safety net)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_security_hardening.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "n/a (backend-only run)"},
+  "test_credentials": "No login. Used fresh X-Device-Id values qa-devA-<uuid8> and qa-devB-<uuid8> per run.",
+  "seed_data_creation": "Each run registers one dummy push token per device and creates/deletes one watched live auction for devA. Autouse session fixture cleans up both devices' auctions at teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All security hardening checks pass. test_security_hardening.py (23 tests) is now in /app/backend/tests/ and reusable as regression. Note: pytest.ini forces -n 2 --dist loadscope; run serial as `pytest ... -n 0`. BASE_URL is auto-read from /app/frontend/.env if REACT_APP_BACKEND_URL env var is unset. Rate-limit burst test uses 25 parallel threads and expects >=1 HTTP 429; it skips (not fails) if the environment rotates ingress IPs. SSRF test verifies scraped=false on 169.254.169.254 and 127.0.0.1:8001 and confirms example.com still returns 200. BOLA covers GET/refresh/analyze/DELETE — all enforced via {id, device_id} compound filter at the Mongo query layer.",
+  "rca of the issue": "No bugs found. One self-inflicted test bug was fixed in-flight: the sort-order check was comparing ends_at as raw strings but the backend sorts by parsed datetime (end_dt), so '2026-10-05T09:15:00+02:00' (which parses earlier than 07:15:15+00:00) sorted lexicographically after it. Fixed by parsing timestamps before comparing."
+}

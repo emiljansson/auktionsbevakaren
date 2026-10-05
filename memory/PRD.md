@@ -149,6 +149,17 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
   (2) **flerstegs-avslutsnotis** vid < 60 min, < 10 min och sista minuten. Endast det mest akuta osedda steget skickas (spåras i `notified_steps`), så användaren inte spammas.
 - Verifierat end-to-end mot CommHub (ny-bud + 10-min-steg triggade korrekt).
 
+## Säkerhetshärdning efter audit (2026-06)
+Löste audit-fynden UTAN att begränsa publik funktion, plus spärr mot sök-flod:
+- **SSRF (SEC-001)**: `scraper.py` blockerar nu interna/privata/loopback/link-local-IP:n (och icke-http) + validerar varje redirect-hopp. Publika auktions-URL:er fungerar som vanligt.
+- **BOLA (SEC-002)**: `GET/POST(refresh,analyze)/DELETE /api/auctions/{id}` scope:ade på `device_id` (annan enhet → 404). `create_auction` kräver + lagrar device_id.
+- **ReDoS/obegränsad laddning (SEC-003)**: `q` escapas (`re.escape`, max 100 tecken), `to_list` kapad 20000→5000, `limit` kapad ≤500.
+- **Rate limiting (SEC-004, användarens önskemål)**: in-memory per-IP (X-Forwarded-For). Sök (q) 15/20s, scrape/refresh/create 20/60s, push_register 20/60s, live/sync 5/60s. Normal flödes-polling (utan q) opåverkad. push-token valideras (20–500 tecken).
+- **Hardening**: CORS `allow_credentials=False` (identitet via header, ej cookies), generiska felmeddelanden (inga råa undantag).
+- Verifierat: testagenten 23/23 gröna, inga regressioner. Regressionssvit: `/app/backend/tests/test_security_hardening.py`.
+- OBS skalning: rate-limitern är per-process (OK för en instans); horisontell skalning kräver Redis-backad limiter.
+- Produktion: fixarna gäller koden – publicera om (Re-publish) för att få dem live, och lägg till COMMHUB-nycklarna i Secrets.
+
 ## Nästa steg (kvar)
 - AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.
