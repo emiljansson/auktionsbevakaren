@@ -263,3 +263,11 @@ Ersatte den tillfälliga hårdkodade "Ladda mina bevakningar"-knappen (och `POST
 - Frontend (App.js): I "Mina bevakningar"-vyn visas "Ditt kontonamn"-panel (input + Spara) när man HAR bevakningar. I tomt läge visas "eller skriv ditt namn om du redan har bevakningar" (input + Hämta) som kör restore. Nya api-metoder: getAccountName/setAccountName/restoreByName. Tog bort importWatches + getDeviceId-användning.
 - Verifierat (curl, preview): sätt namn på enhet med 17+6 -> ny tom enhet restore via namn (skiftlägesokänsligt) -> 17 bevakningar + 6 sökbevakningar. Frontend kompilerar utan fel.
 - Not: namnet är en enkel identifierare utan lösenord (appen är medvetet lösenordslös). Kräver ompublicering för att synas på live.
+
+
+## 4-siffrig PIN-kod på kontonamn (2026-06)
+Lade till valfritt PIN-skydd på det lösenordslösa kontonamnet (via integration_expert-playbook: `bcrypt`-paketet direkt, inte passlib).
+- Backend (server.py): `bcrypt` hash/verify via `asyncio.to_thread` (`_hash_pin_async`/`_verify_pin_async`, rounds=12). Ny `accounts`-kollektion `{name, name_lower, pin_hash}`. `POST /account/name {name, pin?}` sätter/äger namn (fel/saknad PIN på ett PIN-skyddat namn -> 403). `POST /account/restore {name, pin?}` kräver rätt PIN om namnet är skyddat (403 annars), importerar sedan. Båda rate-limitade (`account_name` 15/60, `account_restore` 10/60). `GET /account/name` returnerar `{name, has_pin}`.
+- Frontend (App.js): PIN-fält (4 siffror, numeriskt) i "Ditt kontonamn"-panelen (+ "🔒 Skyddat med PIN-kod"-indikator) och i tomt-läge-återställningen. api.setAccountName/restoreByName tar nu (name, pin). Visar serverns felmeddelande vid fel PIN.
+- Verifierat (curl, preview): sätt namn+PIN 1234 -> restore utan PIN=403, fel PIN=403, rätt PIN=17 bevakningar+6 sökbevakningar. Frontend kompilerar utan fel.
+- Not: 4-siffrig PIN har låg entropi (accepterat av produktägaren); skyddar vid vila (bcrypt) + rate limiting. Kräver ompublicering för live. bcrypt==4.1.3 redan i requirements.

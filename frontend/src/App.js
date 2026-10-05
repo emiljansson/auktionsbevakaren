@@ -56,8 +56,11 @@ function App() {
   const [view, setView] = useState("live");
   const [kwUnseen, setKwUnseen] = useState(0);
   const [accountName, setAccountName] = useState("");
+  const [accountPin, setAccountPin] = useState("");
+  const [hasPin, setHasPin] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [restoreName, setRestoreName] = useState("");
+  const [restorePin, setRestorePin] = useState("");
   const [restoring, setRestoring] = useState(false);
 
   useEffect(() => { document.documentElement.classList.add("dark"); }, []);
@@ -79,17 +82,21 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (view === "watch") load(); }, [view, load]);
-  useEffect(() => { api.getAccountName().then((d) => setAccountName(d.name || "")).catch(() => {}); }, []);
+  useEffect(() => { api.getAccountName().then((d) => { setAccountName(d.name || ""); setHasPin(!!d.has_pin); }).catch(() => {}); }, []);
 
   const handleSaveName = async () => {
     const name = accountName.trim();
     if (name.length < 2) { toast.error("Ange minst 2 tecken"); return; }
+    const pin = accountPin.trim();
+    if (pin && !/^\d{4}$/.test(pin)) { toast.error("PIN-koden måste vara 4 siffror"); return; }
     setSavingName(true);
     try {
-      await api.setAccountName(name);
-      toast.success("Kontonamn sparat - använd det för att återställa på en ny enhet");
+      const res = await api.setAccountName(name, pin);
+      setHasPin(!!res.has_pin);
+      setAccountPin("");
+      toast.success("Kontonamn sparat - använd namn" + (res.has_pin ? " + PIN" : "") + " för att återställa på en ny enhet");
     } catch (e) {
-      toast.error("Kunde inte spara kontonamnet");
+      toast.error(e?.response?.data?.detail || "Kunde inte spara kontonamnet");
     } finally {
       setSavingName(false);
     }
@@ -98,17 +105,20 @@ function App() {
   const handleRestoreByName = async () => {
     const name = restoreName.trim();
     if (name.length < 2) { toast.error("Skriv ditt kontonamn"); return; }
+    const pin = restorePin.trim();
+    if (pin && !/^\d{4}$/.test(pin)) { toast.error("PIN-koden måste vara 4 siffror"); return; }
     setRestoring(true);
     try {
-      const res = await api.restoreByName(name);
+      const res = await api.restoreByName(name, pin);
       if (!res.found) { toast.error("Hittade inget konto med det namnet"); return; }
       toast.success(`Hämtade ${res.watches} bevakningar och ${res.keywords} sökbevakningar`);
       setRestoreName("");
+      setRestorePin("");
       setAccountName(name);
       await load();
       loadKwUnseen();
     } catch (e) {
-      toast.error("Kunde inte återställa - försök igen");
+      toast.error(e?.response?.data?.detail || "Kunde inte återställa - försök igen");
     } finally {
       setRestoring(false);
     }
@@ -278,7 +288,7 @@ function App() {
         {auctions.length > 0 && (
           <div className="mb-5 rounded-xl border border-slate-800 bg-[#111827] p-4" data-testid="account-name-panel">
             <p className="text-sm font-semibold text-slate-200">Ditt kontonamn</p>
-            <p className="mt-1 text-xs text-slate-400">Välj ett namn så kan du återställa alla dina bevakningar på en ny enhet – skriv bara namnet om appen är tom.</p>
+            <p className="mt-1 text-xs text-slate-400">Välj ett namn och (valfritt) en 4-siffrig PIN så kan du återställa alla dina bevakningar på en ny enhet.</p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <input
                 value={accountName}
@@ -287,11 +297,21 @@ function App() {
                 data-testid="account-name-input"
                 className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
               />
+              <input
+                value={accountPin}
+                onChange={(e) => setAccountPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                inputMode="numeric"
+                maxLength={4}
+                placeholder={hasPin ? "PIN (satt)" : "PIN (valfri)"}
+                data-testid="account-pin-input"
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none sm:w-32"
+              />
               <Button onClick={handleSaveName} disabled={savingName} data-testid="account-name-save" className="bg-slate-700 text-slate-100 hover:bg-slate-600">
                 {savingName ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
                 Spara namn
               </Button>
             </div>
+            {hasPin && <p className="mt-1.5 text-[11px] text-emerald-400">🔒 Skyddat med PIN-kod</p>}
           </div>
         )}
 
@@ -319,6 +339,15 @@ function App() {
                   placeholder="Ditt kontonamn"
                   data-testid="restore-name-input"
                   className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
+                />
+                <input
+                  value={restorePin}
+                  onChange={(e) => setRestorePin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  inputMode="numeric"
+                  maxLength={4}
+                  placeholder="PIN (om satt)"
+                  data-testid="restore-pin-input"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none sm:w-32"
                 />
                 <Button onClick={handleRestoreByName} disabled={restoring} data-testid="restore-name-button" className="bg-amber-500 text-slate-950 hover:bg-amber-600">
                   {restoring ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}

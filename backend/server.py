@@ -8,6 +8,7 @@ import asyncio
 import logging
 import time
 import uuid
+import bcrypt
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -99,6 +100,26 @@ class PushRegister(BaseModel):
 
 class AccountNameReq(BaseModel):
     name: str
+    pin: Optional[str] = None
+
+
+def _hash_pin(pin: str) -> str:
+    return bcrypt.hashpw(pin.encode("ascii"), bcrypt.gensalt(rounds=12)).decode("ascii")
+
+
+def _verify_pin(pin: str, stored: str) -> bool:
+    try:
+        return bcrypt.checkpw(pin.encode("ascii"), stored.encode("ascii"))
+    except (ValueError, TypeError, UnicodeError):
+        return False
+
+
+async def _hash_pin_async(pin: str) -> str:
+    return await asyncio.to_thread(_hash_pin, pin)
+
+
+async def _verify_pin_async(pin: str, stored: str) -> bool:
+    return await asyncio.to_thread(_verify_pin, pin, stored)
 
 
 class LiveAnalyzeReq(BaseModel):
@@ -342,41 +363,74 @@ async def push_status(x_device_id: Optional[str] = Header(None)):
 @api_router.get("/account/name")
 async def get_account_name(x_device_id: Optional[str] = Header(None)):
     dev = await db.devices.find_one({"device_id": x_device_id}) if x_device_id else None
-    return {"name": (dev or {}).get("account_name")}
+    name = (dev or {}).get("account_name")
+    has_pin = False
+    if name:
+        acc = await db.accounts.find_one({"name_lower": name.lower()})
+        has_pin = bool(acc and acc.get("pin_hash"))
+    return {"name": name, "has_pin": has_pin}
 
 
 @api_router.post("/account/name")
-async def set_account_name(payload: AccountNameReq, device_id: str = Depends(require_device)):
-    """Claim a personal, password-less account name on this device so the user can
-    later restore their bevakningar on a new/empty device by typing the name."""
+async def set_account_name(payload: AccountNameReq, request: Request, device_id: str = Depends(require_device)):
+    """Claim a personal account name on this device (optionally protected by a
+    4-digit PIN) so bevakningar can be restored on a new device by typing the name."""
+    _rate_limit(request, "account_name", 15, 60)
     name = re.sub(r"\s+", " ", (payload.name or "").strip())[:40]
     if len(name) < 2:
         raise HTTPException(status_code=400, detail="Namnet måste vara minst 2 tecken.")
+    pin = (payload.pin or "").strip()
+    if pin and not re.fullmatch(r"\d{4}", pin):
+        raise HTTPException(status_code=400, detail="PIN-koden måste vara exakt 4 siffror.")
     now = datetime.now(timezone.utc).isoformat()
+    acc = await db.accounts.find_one({"name_lower": name.lower()})
+    if acc:
+        if acc.get("pin_hash"):
+            # Name is taken and PIN-protected: must prove ownership to use it.
+            if not pin or not await _verify_pin_async(pin, acc["pin_hash"]):
+                raise HTTPException(status_code=403, detail="Fel PIN-kod för detta namn.")
+        elif pin:
+            await db.accounts.update_one({"_id": acc["_id"]}, {"$set": {"pin_hash": await _hash_pin_async(pin)}})
+        has_pin = bool(acc.get("pin_hash") or pin)
+    else:
+        doc = {"name": name, "name_lower": name.lower(), "created_at": now}
+        if pin:
+            doc["pin_hash"] = await _hash_pin_async(pin)
+        await db.accounts.insert_one(doc)
+        has_pin = bool(pin)
     await db.devices.update_one(
         {"device_id": device_id},
         {"$set": {"account_name": name, "account_name_lower": name.lower(), "updated_at": now},
          "$setOnInsert": {"created_at": now}},
         upsert=True,
     )
-    return {"ok": True, "name": name}
+    return {"ok": True, "name": name, "has_pin": has_pin}
 
 
 @api_router.post("/account/restore")
-async def restore_by_name(payload: AccountNameReq, device_id: str = Depends(require_device)):
+async def restore_by_name(payload: AccountNameReq, request: Request, device_id: str = Depends(require_device)):
     """Restore bevakningar + sökbevakningar onto THIS device from every other
-    device that shares the given account name (dedup by url / keyword). Also links
-    this device to that account so future restores work too."""
+    device sharing the account name (dedup). PIN-protected names require the PIN."""
+    _rate_limit(request, "account_restore", 10, 60)
     name = re.sub(r"\s+", " ", (payload.name or "").strip())[:40]
     if len(name) < 2:
         raise HTTPException(status_code=400, detail="Ange ditt kontonamn (minst 2 tecken).")
+    pin = (payload.pin or "").strip()
+    acc = await db.accounts.find_one({"name_lower": name.lower()})
+    has_devices = await db.devices.find_one({"account_name_lower": name.lower()})
+    if not acc and not has_devices:
+        return {"ok": True, "found": False, "watches": 0, "keywords": 0, "pin_required": False}
+    if acc and acc.get("pin_hash"):
+        if not pin:
+            raise HTTPException(status_code=403, detail="Det här namnet är skyddat med PIN-kod.")
+        if not await _verify_pin_async(pin, acc["pin_hash"]):
+            raise HTTPException(status_code=403, detail="Fel PIN-kod.")
     src_ids = []
     async for d in db.devices.find({"account_name_lower": name.lower()}, {"device_id": 1}):
         did = d.get("device_id")
         if did and did != device_id:
             src_ids.append(did)
     now = datetime.now(timezone.utc).isoformat()
-    # Always link this device to the name so it becomes part of the account.
     await db.devices.update_one(
         {"device_id": device_id},
         {"$set": {"account_name": name, "account_name_lower": name.lower(), "updated_at": now},
@@ -384,7 +438,7 @@ async def restore_by_name(payload: AccountNameReq, device_id: str = Depends(requ
         upsert=True,
     )
     if not src_ids:
-        return {"ok": True, "found": False, "watches": 0, "keywords": 0}
+        return {"ok": True, "found": False, "watches": 0, "keywords": 0, "pin_required": False}
     existing = set()
     async for a in db.auctions.find({"device_id": device_id}, {"url": 1}):
         existing.add(a.get("url"))
