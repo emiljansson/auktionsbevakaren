@@ -139,7 +139,12 @@ class KlaravikAdapter:
 
     @staticmethod
     def _page_items(html):
-        """Parse one listing page's JSON-LD ItemList into item dicts."""
+        """Parse one listing page's JSON-LD ItemList into item dicts. The listing
+        also embeds a per-object end-time blob ("id":..,"auctionEnd":<unix>), so
+        every item gets its countdown (ends_at) straight from discovery."""
+        ends = {}
+        for m in re.finditer(r'"id":(\d+),"timeLeft":".*?","auctionEnd":(\d+)', html):
+            ends[m.group(1)] = int(m.group(2))
         il = _ld_type(BeautifulSoup(html, "lxml"), "ItemList")
         out = []
         for el in (il or {}).get("itemListElement", []):
@@ -147,9 +152,17 @@ class KlaravikAdapter:
             name, url = item.get("name"), item.get("url")
             if not name or not url:
                 continue
+            ends_at = None
+            mid = re.search(r"/produkt/(\d+)", url)
+            if mid and ends.get(mid.group(1)):
+                try:
+                    ends_at = datetime.fromtimestamp(ends[mid.group(1)], tz=timezone.utc).isoformat()
+                except Exception:
+                    ends_at = None
             out.append({
                 "source": "Klaravik", "title": name, "image": item.get("image"),
-                "current_bid": _to_int((item.get("offers") or {}).get("price")) or 0, "url": url,
+                "current_bid": _to_int((item.get("offers") or {}).get("price")) or 0,
+                "ends_at": ends_at, "url": url,
             })
         return out
 

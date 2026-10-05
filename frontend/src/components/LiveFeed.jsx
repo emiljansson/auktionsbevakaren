@@ -88,7 +88,7 @@ export const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
         <Button size="sm" variant="outline" onClick={() => onOpen?.(a)}
           data-testid={`detail-live-${encodeURIComponent(a.url).slice(-16)}`}
           title="Detaljer & AI-värdering"
-          className="h-8 border-slate-700 text-violet-300 hover:bg-slate-800">
+          className="hidden h-8 border-slate-700 text-violet-300 hover:bg-slate-800 sm:inline-flex">
           <Sparkles className="h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" asChild className="h-8 border-slate-700 text-slate-300 hover:bg-slate-800">

@@ -174,6 +174,10 @@ Användarfråga: "9297 objekt och stiger – riktigt eller loopar indexeringen?"
 ## Responsiv header (2026-06)
 Headern var trång på mobil (logo + notis + 3 flikar på en rad, kollision). Omgjord i `App.js`: container `flex-wrap`; rad 1 = logo/titel/"Övervakar X källor" + notis-knapp, rad 2 (mobil) = flik-kontrollen som helbredds-segmenterad kontroll (`order-last w-full`, varje flik `flex-1`). På desktop (`sm:`) återgår flikarna till en inline-rad till höger. Verifierat: ingen header-overflow på 390px eller 1920px; desktop-header 74px (en rad). Dessutom: Auto-crawler-statuskortet i live-flödet döljs på mobil (`hidden sm:block`) för att spara plats.
 
+## Klaravik-klocka från start + AI-knapp dold på mobil (2026-06)
+- **Klaravik nedräkning från start**: listningssidan bäddar in per-objekt sluttid (`"id":..,"auctionEnd":<unix>`). `KlaravikAdapter._page_items` parsar nu detta och matchar objekt-id ur URL:en (`/produkt/<id>`) → varje Klaravik-objekt får `ends_at` direkt vid discovery (tidigare bara via refresh = 6% täckning → nu 100%). Gamla stale Klaravik-objekt utan sluttid (ej längre i listningen) rensades (engångs).
+- **AI/Sparkles-knapp dold på mobil**: "Detaljer & AI"-knappen på live-korten (`detail-live-*`) får `hidden sm:inline-flex` – syns på desktop, döljs på mobil (fick inte plats). Verifierat: mobil 0 synliga + Klaravik-klocka på alla kort; desktop alla kort har knappen.
+
 ## Ny källa: Riksauktioner.se (2026-06)
 Riksauktioner är en headless WordPress + Next.js-sajt med ett separat JSON auktions-API på `se01.riksauktioner.se`. Ny `RiksauktionerAdapter` (i `adapters.py`):
 - `discover()`: paginerar `/objects?limit=50&page=N` (~12 sidor, 500+ objekt), behåller `status=="available"`. Fält: titel, `leading_bid`→current_bid, `num_bids_placed`→bid_count, `ending`→ends_at, per-objekt moms (`no_tax=="YES"`→0% annars 25%), objekt-URL `riksauktioner.se/objekt/{id}`.
