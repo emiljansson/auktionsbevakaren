@@ -143,6 +143,12 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 - Problem: `hela_sverige?q=moped` omdirigerade till `/mobility/search/mc` (hela MC-kategorin) och ignorerade nyckelordet → visade motorcyklar utan ordet "moped".
 - Fix: `blocket.py` använder nu `recommerce/forsale/search?q=` direkt (nyckelordsmatchar som Blocket-appen) + efterfiltrering som bara behåller annonser där alla sökord finns i kort-texten. Gamla felaktiga Blocket-docs rensade.
 
+## Flerstegs- & nytt-bud-notiser (2026-06)
+- `_watch_notifier` (server.py) ersätter enkel-notisen: per enhet och bevakat objekt skickas nu
+  (1) **push vid nytt bud** (när live-budet överstiger senast notifierade; spåras i `notified_bid`), och
+  (2) **flerstegs-avslutsnotis** vid < 60 min, < 10 min och sista minuten. Endast det mest akuta osedda steget skickas (spåras i `notified_steps`), så användaren inte spammas.
+- Verifierat end-to-end mot CommHub (ny-bud + 10-min-steg triggade korrekt).
+
 ## Nästa steg (kvar)
 - AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.

@@ -462,45 +462,88 @@ async def startup():
         logger.exception("could not create unique watch index")
     await db.devices.create_index("device_id", unique=True)
     crawler.start()
-    asyncio.create_task(_ending_notifier())
+    asyncio.create_task(_watch_notifier())
 
 
-async def _ending_notifier():
-    """Push a notification to the watching device when one of its watched
-    auctions is about to end (within the next hour), once per auction."""
+async def _watch_notifier():
+    """Per-device push for watched items: (1) when a new (higher) bid is placed,
+    and (2) multi-step ending alerts at <60 min, <10 min and the last minute.
+    Only the most urgent unseen ending-step fires, so users aren't spammed."""
     await asyncio.sleep(25)
+    order = ["60", "10", "1"]
     while True:
         try:
             if commhub.enabled():
                 now = datetime.now(timezone.utc)
-                soon = (now + timedelta(minutes=60)).isoformat()
-                cursor = db.auctions.find({
-                    "ends_at": {"$gt": now.isoformat(), "$lte": soon},
-                    "notified_ending": {"$ne": True},
-                    "device_id": {"$ne": None},
-                })
-                async for d in cursor:
-                    dev = await db.devices.find_one({"device_id": d.get("device_id")})
+                async for a in db.auctions.find({"device_id": {"$ne": None}}):
+                    dev = await db.devices.find_one({"device_id": a.get("device_id")})
                     token = (dev or {}).get("token")
-                    if token:
-                        try:
-                            end = datetime.fromisoformat(d["ends_at"])
-                            mins = max(1, int((end - now).total_seconds() // 60))
-                        except Exception:
-                            mins = 60
+                    if not token:
+                        continue
+                    lv = await db.live_auctions.find_one({"url": a["url"]}, {"_id": 0})
+                    if not lv:
+                        continue
+                    changes = {}
+                    title = (lv.get("title") or a.get("title") or "Objekt")[:70]
+                    data = {"url": a.get("url") or ""}
+
+                    # (1) New bid
+                    cur = lv.get("current_bid") or 0
+                    last = a.get("notified_bid")
+                    if last is None:
+                        last = a.get("current_bid") or 0
+                    if cur and cur > last:
                         try:
                             await commhub.send_to_token(
-                                token,
-                                title="⏰ Auktion avslutas snart",
-                                body=f"{d['title'][:70]} slutar om {mins} min",
-                                data={"url": d.get("url") or ""},
-                            )
+                                token, title="💰 Nytt bud",
+                                body=f"{title}: nytt bud {_fmt_sek(cur)} kr", data=data)
                         except Exception:
-                            logger.exception("ending push failed")
-                    await db.auctions.update_one({"id": d["id"]}, {"$set": {"notified_ending": True}})
+                            logger.exception("new-bid push failed")
+                        changes["notified_bid"] = cur
+
+                    # (2) Multi-step ending alert (prefer the live end time)
+                    end = _parse_iso(lv.get("ends_at") or a.get("ends_at"))
+                    if end and end > now:
+                        mins = (end - now).total_seconds() / 60
+                        if mins <= 1:
+                            step, label = "1", "slutar inom 1 minut!"
+                        elif mins <= 10:
+                            step, label = "10", "slutar inom 10 minuter"
+                        elif mins <= 60:
+                            step, label = "60", "slutar inom 1 timme"
+                        else:
+                            step = None
+                        sent = set(a.get("notified_steps", []))
+                        if step and step not in sent:
+                            try:
+                                await commhub.send_to_token(
+                                    token, title="⏰ Auktion snart slut",
+                                    body=f"{title} {label}", data=data)
+                            except Exception:
+                                logger.exception("ending push failed")
+                            for s in order[: order.index(step) + 1]:
+                                sent.add(s)
+                            changes["notified_steps"] = list(sent)
+
+                    if changes:
+                        await db.auctions.update_one({"id": a["id"]}, {"$set": changes})
         except Exception:
-            logger.exception("ending notifier loop")
+            logger.exception("watch notifier loop")
         await asyncio.sleep(60)
+
+
+def _fmt_sek(n):
+    return f"{int(round(n)):,}".replace(",", " ")
+
+
+def _parse_iso(s):
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
 
 
 @app.on_event("shutdown")
