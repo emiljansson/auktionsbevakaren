@@ -255,3 +255,11 @@ Kontext: preview och produktion använder SEPARATA databaser. En användare bygg
 - Frontend: Panel i "Mina bevakningar"-vyn (App.js) som visar nuvarande `getDeviceId()` ("Denna enhets kod") + knapp "Ladda mina bevakningar" (device-koden är hårdkodad på knappen per användarens önskemål). Ny `api.importWatches(fromId)`.
 - Verifierat i PROD (curl): import 17 bevakningar + 6 sökbevakningar till användarens iPhone-device `9ea92875-...`; push registrerad. Preview-test: 17/6 kopierat, andra körning 0/0 (idempotent).
 - Not: Kan tas bort på begäran. Den hårdkodade koden `f8d3d881-...` i knappen är användarspecifik och bör generaliseras (fält) om funktionen ska vara kvar permanent.
+
+
+## Lösenordslöst kontonamn för återställning (2026-06)
+Ersatte den tillfälliga hårdkodade "Ladda mina bevakningar"-knappen (och `POST /api/account/import`) med en namn-baserad återställning.
+- Backend (server.py): `GET /api/account/name`, `POST /api/account/name {name}` (claimar namn på enhetens `devices`-dok: `account_name` + `account_name_lower`), `POST /api/account/restore {name}` (kopierar auctions+keyword_watches från ALLA enheter med samma namn till nuvarande device, dedupe på url/keyword_lower, skiftlägesokänsligt, länkar även nuvarande enhet till namnet). Ingen push-token krävs. Idempotent.
+- Frontend (App.js): I "Mina bevakningar"-vyn visas "Ditt kontonamn"-panel (input + Spara) när man HAR bevakningar. I tomt läge visas "eller skriv ditt namn om du redan har bevakningar" (input + Hämta) som kör restore. Nya api-metoder: getAccountName/setAccountName/restoreByName. Tog bort importWatches + getDeviceId-användning.
+- Verifierat (curl, preview): sätt namn på enhet med 17+6 -> ny tom enhet restore via namn (skiftlägesokänsligt) -> 17 bevakningar + 6 sökbevakningar. Frontend kompilerar utan fel.
+- Not: namnet är en enkel identifierare utan lösenord (appen är medvetet lösenordslös). Kräver ompublicering för att synas på live.

@@ -97,8 +97,8 @@ class PushRegister(BaseModel):
     platform: Optional[str] = "web"
 
 
-class ImportWatchesReq(BaseModel):
-    from_device_id: str
+class AccountNameReq(BaseModel):
+    name: str
 
 
 class LiveAnalyzeReq(BaseModel):
@@ -339,19 +339,57 @@ async def push_status(x_device_id: Optional[str] = Header(None)):
     return {"registered": bool(dev and dev.get("token"))}
 
 
-@api_router.post("/account/import")
-async def import_watches(payload: ImportWatchesReq, device_id: str = Depends(require_device)):
-    """Restore/transfer: copy all watched items + keyword watches from another
-    device code onto THIS device (dedup by url / keyword). Used when a user moves
-    to a new device/install and wants their bevakningar back."""
-    src = (payload.from_device_id or "").strip()
-    if not src or src == device_id:
-        return {"ok": True, "watches": 0, "keywords": 0, "same": src == device_id}
+@api_router.get("/account/name")
+async def get_account_name(x_device_id: Optional[str] = Header(None)):
+    dev = await db.devices.find_one({"device_id": x_device_id}) if x_device_id else None
+    return {"name": (dev or {}).get("account_name")}
+
+
+@api_router.post("/account/name")
+async def set_account_name(payload: AccountNameReq, device_id: str = Depends(require_device)):
+    """Claim a personal, password-less account name on this device so the user can
+    later restore their bevakningar on a new/empty device by typing the name."""
+    name = re.sub(r"\s+", " ", (payload.name or "").strip())[:40]
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Namnet måste vara minst 2 tecken.")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.devices.update_one(
+        {"device_id": device_id},
+        {"$set": {"account_name": name, "account_name_lower": name.lower(), "updated_at": now},
+         "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    return {"ok": True, "name": name}
+
+
+@api_router.post("/account/restore")
+async def restore_by_name(payload: AccountNameReq, device_id: str = Depends(require_device)):
+    """Restore bevakningar + sökbevakningar onto THIS device from every other
+    device that shares the given account name (dedup by url / keyword). Also links
+    this device to that account so future restores work too."""
+    name = re.sub(r"\s+", " ", (payload.name or "").strip())[:40]
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Ange ditt kontonamn (minst 2 tecken).")
+    src_ids = []
+    async for d in db.devices.find({"account_name_lower": name.lower()}, {"device_id": 1}):
+        did = d.get("device_id")
+        if did and did != device_id:
+            src_ids.append(did)
+    now = datetime.now(timezone.utc).isoformat()
+    # Always link this device to the name so it becomes part of the account.
+    await db.devices.update_one(
+        {"device_id": device_id},
+        {"$set": {"account_name": name, "account_name_lower": name.lower(), "updated_at": now},
+         "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    if not src_ids:
+        return {"ok": True, "found": False, "watches": 0, "keywords": 0}
     existing = set()
     async for a in db.auctions.find({"device_id": device_id}, {"url": 1}):
         existing.add(a.get("url"))
     w = 0
-    async for a in db.auctions.find({"device_id": src}):
+    async for a in db.auctions.find({"device_id": {"$in": src_ids}}):
         if a.get("url") in existing:
             continue
         a.pop("_id", None)
@@ -363,7 +401,7 @@ async def import_watches(payload: ImportWatchesReq, device_id: str = Depends(req
     async for k in db.keyword_watches.find({"device_id": device_id}, {"keyword_lower": 1}):
         existing_kw.add(k.get("keyword_lower"))
     kc = 0
-    async for k in db.keyword_watches.find({"device_id": src}):
+    async for k in db.keyword_watches.find({"device_id": {"$in": src_ids}}):
         kl = k.get("keyword_lower") or (k.get("keyword") or "").lower().strip()
         if kl in existing_kw:
             continue
@@ -373,7 +411,7 @@ async def import_watches(payload: ImportWatchesReq, device_id: str = Depends(req
         await db.keyword_watches.insert_one(k)
         existing_kw.add(kl)
         kc += 1
-    return {"ok": True, "watches": w, "keywords": kc}
+    return {"ok": True, "found": True, "watches": w, "keywords": kc}
 
 
 

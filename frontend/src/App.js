@@ -13,7 +13,6 @@ import KeywordWatches from "@/components/KeywordWatches";
 import { api } from "@/lib/api";
 import { SOURCES, formatSEK } from "@/lib/sources";
 import { PushProvider, usePush } from "@/context/push";
-import { getDeviceId } from "@/lib/push";
 
 const NotifButton = () => {
   const push = usePush();
@@ -56,7 +55,10 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("live");
   const [kwUnseen, setKwUnseen] = useState(0);
-  const [importing, setImporting] = useState(false);
+  const [accountName, setAccountName] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [restoreName, setRestoreName] = useState("");
+  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => { document.documentElement.classList.add("dark"); }, []);
 
@@ -77,20 +79,38 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (view === "watch") load(); }, [view, load]);
+  useEffect(() => { api.getAccountName().then((d) => setAccountName(d.name || "")).catch(() => {}); }, []);
 
-  const handleImport = async () => {
-    const code = "f8d3d881-2af7-4094-8a69-bdc295fcbfde";
-    setImporting(true);
+  const handleSaveName = async () => {
+    const name = accountName.trim();
+    if (name.length < 2) { toast.error("Ange minst 2 tecken"); return; }
+    setSavingName(true);
     try {
-      const res = await api.importWatches(code);
-      if (res.same) toast.info("Det är samma enhet – inget att hämta");
-      else toast.success(`Hämtade ${res.watches} bevakningar och ${res.keywords} sökbevakningar`);
+      await api.setAccountName(name);
+      toast.success("Kontonamn sparat - använd det för att återställa på en ny enhet");
+    } catch (e) {
+      toast.error("Kunde inte spara kontonamnet");
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleRestoreByName = async () => {
+    const name = restoreName.trim();
+    if (name.length < 2) { toast.error("Skriv ditt kontonamn"); return; }
+    setRestoring(true);
+    try {
+      const res = await api.restoreByName(name);
+      if (!res.found) { toast.error("Hittade inget konto med det namnet"); return; }
+      toast.success(`Hämtade ${res.watches} bevakningar och ${res.keywords} sökbevakningar`);
+      setRestoreName("");
+      setAccountName(name);
       await load();
       loadKwUnseen();
     } catch (e) {
-      toast.error("Kunde inte hämta bevakningar");
+      toast.error("Kunde inte återställa - försök igen");
     } finally {
-      setImporting(false);
+      setRestoring(false);
     }
   };
 
@@ -254,18 +274,26 @@ function App() {
           </Select>
         </div>
 
-        {/* Restore / transfer watches */}
-        <div className="mb-5 rounded-xl border border-amber-700/40 bg-amber-500/5 p-4" data-testid="restore-panel">
-          <p className="text-sm font-semibold text-amber-300">Återställ mina bevakningar</p>
-          <p className="mt-1 break-all text-xs text-slate-400">
-            Denna enhets kod: <span className="font-mono text-slate-300" data-testid="current-device-id">{getDeviceId()}</span>
-          </p>
-          <p className="mt-2 text-xs text-slate-400">Tryck för att hämta alla dina tidigare bevakningar och sökbevakningar hit.</p>
-          <Button onClick={handleImport} disabled={importing} data-testid="restore-load-button" className="mt-2 bg-amber-500 text-slate-950 hover:bg-amber-600">
-            {importing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-            Ladda mina bevakningar
-          </Button>
-        </div>
+        {/* Account name (password-less backup) – shown when you have watches */}
+        {auctions.length > 0 && (
+          <div className="mb-5 rounded-xl border border-slate-800 bg-[#111827] p-4" data-testid="account-name-panel">
+            <p className="text-sm font-semibold text-slate-200">Ditt kontonamn</p>
+            <p className="mt-1 text-xs text-slate-400">Välj ett namn så kan du återställa alla dina bevakningar på en ny enhet – skriv bara namnet om appen är tom.</p>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={accountName}
+                onChange={(e) => setAccountName(e.target.value)}
+                placeholder="t.ex. janne-mopeder"
+                data-testid="account-name-input"
+                className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
+              />
+              <Button onClick={handleSaveName} disabled={savingName} data-testid="account-name-save" className="bg-slate-700 text-slate-100 hover:bg-slate-600">
+                {savingName ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+                Spara namn
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Grid */}
         {loading ? (
@@ -282,6 +310,22 @@ function App() {
             <Button onClick={() => setAddOpen(true)} data-testid="empty-add-button" className="mt-5 bg-amber-500 text-slate-950 hover:bg-amber-600">
               <Plus className="mr-1.5 h-4 w-4" /> Bevaka första auktionen
             </Button>
+            <div className="mt-8 w-full max-w-sm border-t border-slate-800 pt-6">
+              <p className="text-sm text-slate-400">eller skriv ditt namn om du redan har bevakningar</p>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={restoreName}
+                  onChange={(e) => setRestoreName(e.target.value)}
+                  placeholder="Ditt kontonamn"
+                  data-testid="restore-name-input"
+                  className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
+                />
+                <Button onClick={handleRestoreByName} disabled={restoring} data-testid="restore-name-button" className="bg-amber-500 text-slate-950 hover:bg-amber-600">
+                  {restoring ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+                  Hämta
+                </Button>
+              </div>
+            </div>
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid="auctions-grid">
