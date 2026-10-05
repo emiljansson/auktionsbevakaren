@@ -703,13 +703,16 @@ async def get_keyword_watch(wid: str, device_id: str = Depends(require_device)):
     matches = w.get("matches", [])
     urls = [m["url"] for m in matches]
     items = []
-    if urls:
+    if matches:
         found = {}
         async for d in db.live_auctions.find({"url": {"$in": urls}}, {"_id": 0}):
             found[d["url"]] = d
         for m in reversed(matches):  # newest found first
-            d = found.get(m["url"])
+            # Prefer the live doc (freshest bid); fall back to the stored snapshot
+            # so items persist even after the 24h live-feed cleanup removes them.
+            d = found.get(m["url"]) or m.get("snapshot")
             if d:
+                d = dict(d)
                 d["found_at"] = m["found_at"]
                 items.append(d)
     await db.keyword_watches.update_one({"id": wid}, {"$set": {"unseen_count": 0}})
@@ -864,7 +867,19 @@ async def _run_keyword_check(w, now):
     new = [u for u in urls if u not in seen]
     update = {"last_check": now.isoformat(), "seen_urls": list(seen | urls)}
     if new:
-        matches = w.get("matches", []) + [{"url": u, "found_at": now.isoformat()} for u in new]
+        # Snapshot each newly-found item so it survives the 24h live-feed cleanup
+        # (search results are purged from live_auctions, but the watch keeps them).
+        snaps = {}
+        async for d in db.live_auctions.find(
+            {"url": {"$in": new}},
+            {"_id": 0, "url": 1, "title": 1, "image": 1, "source": 1,
+             "current_bid": 1, "starting_price": 1, "total_now": 1, "bid_count": 1,
+             "ends_at": 1, "fixed_price": 1, "fee_known": 1, "fee_approx": 1, "fee_note": 1},
+        ):
+            snaps[d["url"]] = d
+        new_matches = [{"url": u, "found_at": now.isoformat(),
+                        "snapshot": snaps.get(u, {"url": u})} for u in new]
+        matches = w.get("matches", []) + new_matches
         update["matches"] = matches[-500:]
         update["unseen_count"] = (w.get("unseen_count", 0) or 0) + len(new)
         dev = await db.devices.find_one({"device_id": w["device_id"]})

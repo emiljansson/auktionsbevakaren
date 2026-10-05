@@ -16,14 +16,13 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// CommHub sends an FCM *notification* payload (title/body), which the browser
+// displays automatically in the background. Do NOT call showNotification() here
+// as well — that produced TWO identical notifications per message. Keep the
+// handler for logging only so exactly one notification is shown.
 messaging.onBackgroundMessage((payload) => {
-  const n = payload.notification || payload.data || {};
-  self.registration.showNotification(n.title || "Auktionsbevakning", {
-    body: n.body || "",
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
-    data: payload.data || {},
-  });
+  // eslint-disable-next-line no-console
+  console.debug("[push] background message", payload);
 });
 
 self.addEventListener("notificationclick", (event) => {
