@@ -173,8 +173,8 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
 
   return (
     <div data-testid="live-feed">
-      {/* Status bar (compact) */}
-      <div className="mb-4 rounded-lg border border-slate-800 bg-[#111827] px-3 py-2.5">
+      {/* Status bar (compact) — hidden on mobile to save space */}
+      <div className="mb-4 hidden rounded-lg border border-slate-800 bg-[#111827] px-3 py-2.5 sm:block">
         <div className="flex items-center gap-x-3">
           <span className="flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-100">
             <span className="relative flex h-2 w-2">
