@@ -199,6 +199,8 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
                 d[k] = lv[k]
         d["bid_count"] = _real_bid_count(lv)
         d["bid_history"] = _bid_history(lv)
+    # Soonest-ending first; items without an end time go last.
+    docs.sort(key=lambda d: d.get("ends_at") or "9999")
     return [Auction(**_clean(d)) for d in docs]
 
 
@@ -384,6 +386,8 @@ async def watch_live(payload: WatchCreate, device_id: str = Depends(require_devi
     doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Live-auktion hittades inte.")
+    if await db.auctions.find_one({"url": payload.url, "device_id": device_id}):
+        raise HTTPException(status_code=409, detail="Du bevakar redan denna auktion.")
     # Learn the exact slagavgift right away if it isn't known yet, so the watched
     # item shows the fee immediately (Klaravik/Fabeo/Netauktion learn it per item).
     if not doc.get("fee_known"):
@@ -421,6 +425,10 @@ app.add_middleware(
 async def startup():
     await db.live_auctions.create_index("url", unique=True)
     await db.auctions.create_index("device_id")
+    try:
+        await db.auctions.create_index([("device_id", 1), ("url", 1)], unique=True)
+    except Exception:
+        logger.exception("could not create unique watch index")
     await db.devices.create_index("device_id", unique=True)
     crawler.start()
     asyncio.create_task(_ending_notifier())

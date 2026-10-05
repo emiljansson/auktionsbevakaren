@@ -128,6 +128,10 @@ Ett system som kollar våra vanligaste auktionssiter i Sverige och bevakar budhi
 ## Budhistorik-bugg fixad (2026-06)
 - Bevakade objekt visade simulerad 3-punktsgraf + fel budantal. Nu: riktigt budantal från live-datan (t.ex. 37) och riktig spårad `price_history`; när < 2 punkter visas en förklarande not istället för en vilseledande graf. `_bid_history`/`_real_bid_count` i server.py; `AuctionDetail.jsx` graf-fallback.
 
+## Bevakningslista: sortering + dedupe (2026-06)
+- `GET /auctions` sorterar nu med **minst tid kvar överst** (ends_at stigande; objekt utan sluttid sist).
+- `POST /live/watch` hindrar **dubbletter** per enhet (409 "Du bevakar redan denna auktion."). Unikt index `(device_id, url)` + befintliga dubbletter rensade.
+
 ## Nästa steg (kvar)
 - AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.
