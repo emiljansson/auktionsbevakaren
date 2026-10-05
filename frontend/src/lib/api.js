@@ -28,6 +28,10 @@ export const api = {
   liveWatch: (url) => axios.post(`${API}/live/watch`, { url }).then((r) => r.data),
   liveAnalyze: (url) => axios.post(`${API}/live/analyze`, { url }).then((r) => r.data),
   pushStatus: () => axios.get(`${API}/push/status`).then((r) => r.data),
+  kwList: () => axios.get(`${API}/keyword-watches`).then((r) => r.data),
+  kwCreate: (keyword) => axios.post(`${API}/keyword-watches`, { keyword }).then((r) => r.data),
+  kwGet: (id) => axios.get(`${API}/keyword-watches/${id}`).then((r) => r.data),
+  kwDelete: (id) => axios.delete(`${API}/keyword-watches/${id}`).then((r) => r.data),
 };
 
 export default api;

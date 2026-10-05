@@ -15,9 +15,10 @@ const STATUS_CHIP = {
   needs_key: { cls: "bg-amber-500/15 text-amber-400 border-amber-500/30", label: "Kräver nyckel" },
   blocked: { cls: "bg-red-500/15 text-red-400 border-red-500/30", label: "Blockerad" },
   planned: { cls: "bg-slate-500/15 text-slate-400 border-slate-600/30", label: "Planerad" },
+  search: { cls: "bg-violet-500/15 text-violet-300 border-violet-500/30", label: "Sök på begäran" },
 };
 
-const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
+export const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
   const tl = timeLeft(a.ends_at);
   return (
   <motion.div

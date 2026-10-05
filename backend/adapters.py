@@ -729,6 +729,8 @@ SOURCE_STATUS = {
     "Tovek": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid, moms & slagavgift)."},
     "PS Auction": {"status": "active", "note": "Automatisk bevakning via renderande proxy (löser AWS WAF). Uppdateras var ~4:e timme."},
     "Blinto": {"status": "active", "note": "Automatisk bevakning aktiv (via renderande proxy som löser anti-bot)."},
+    "Tradera": {"status": "search", "note": "Sök på begäran – skriv ett sökord så hämtas Tradera-träffar live (inget automatiskt 'hämta allt'-flöde)."},
+    "Blocket": {"status": "search", "note": "Sök på begäran – skriv ett sökord så hämtas Blocket-träffar live (inget automatiskt 'hämta allt'-flöde)."},
 }
 
 

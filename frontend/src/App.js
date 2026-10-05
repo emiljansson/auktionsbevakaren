@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import "@/App.css";
 import { AnimatePresence, motion } from "framer-motion";
-import { Gavel, Plus, Radar, Sparkles, Wallet, Layers, TrendingDown, Loader2, Bell, BellRing } from "lucide-react";
+import { Gavel, Plus, Radar, Sparkles, Wallet, Layers, TrendingDown, Loader2, Bell, BellRing, Search } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -9,6 +9,7 @@ import AuctionCard from "@/components/AuctionCard";
 import AddAuctionModal from "@/components/AddAuctionModal";
 import AuctionDetail from "@/components/AuctionDetail";
 import LiveFeed from "@/components/LiveFeed";
+import KeywordWatches from "@/components/KeywordWatches";
 import { api } from "@/lib/api";
 import { SOURCES, formatSEK } from "@/lib/sources";
 import { PushProvider, usePush } from "@/context/push";
@@ -172,6 +173,13 @@ function App() {
               <Radar className="h-4 w-4" /> <span className="hidden sm:inline">Live-flöde</span><span className="sm:hidden">Live</span>
             </button>
             <button
+              onClick={() => setView("search")}
+              data-testid="view-search"
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:px-4 sm:py-2 ${view === "search" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
+            >
+              <Search className="h-4 w-4" /> <span className="hidden sm:inline">Sökbevakning</span><span className="sm:hidden">Sök</span>
+            </button>
+            <button
               onClick={() => setView("watch")}
               data-testid="view-watch"
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:px-4 sm:py-2 ${view === "watch" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
@@ -186,6 +194,8 @@ function App() {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {view === "live" ? (
           <LiveFeed onWatchAdded={load} onOpen={openLiveDetail} />
+        ) : view === "search" ? (
+          <KeywordWatches onWatchAdded={load} onOpen={openLiveDetail} />
         ) : (
         <>
         {/* Stats */}

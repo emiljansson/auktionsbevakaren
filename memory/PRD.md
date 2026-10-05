@@ -171,6 +171,17 @@ Användarfråga: "9297 objekt och stiger – riktigt eller loopar indexeringen?"
 - Push vid stundande avslut via externt system.
 - Prisfilter/sortering i live-flödet.
 
+## Tradera/Blocket som källor + Sökbevakning (2026-06)
+- **Tradera & Blocket i Auto-crawler-menyn**: tillagda i `adapters.SOURCE_STATUS` med status `"search"` + notis ("Sök på begäran"). Frontend `STATUS_CHIP.search` (lila chip). De syns nu i Auto-crawler-kortet och källfiltret (headern visar "10 källor"). Förblir sök-på-begäran (inget auto-crawl utan sökord).
+- **Sökbevakning (keyword watch, ny flik)**: bevaka ett sökord i ALLA 10 system; var 4:e timme körs sökningen om och pushnotis skickas OM nya objekt dykt upp sedan start.
+  - Collection `keyword_watches`: `{id, device_id, keyword, keyword_lower, created_at, last_check, seen_urls[], matches[{url,found_at}], unseen_count, active}`. Index: device_id + unik (device_id, keyword_lower).
+  - Baslinje vid skapande: alla nuvarande träffar sparas som `seen_urls` (räknas ej som nya).
+  - `server._keyword_matches(keyword)`: live-sök Tradera+Blocket (upsert) + DB-match (titel-regex ELLER search_q) → alla matchande URL:er.
+  - `_keyword_watch_loop()` (startup-task): var 15:e min, kör `_run_keyword_check` för watches vars `last_check` > 4h. Nya URL:er (ej i seen_urls) → lägg i matches, öka unseen_count, pusha "🔎 Nya träffar för 'X'" via CommHub.
+  - Endpoints (alla device-scope:ade, POST kräver push-token): `POST/GET/GET {id}/DELETE /api/keyword-watches`. GET {id} nollställer unseen_count och returnerar upplösta objekt (nyast först).
+  - Frontend: ny flik "Sökbevakning" (`view-search`), komponent `KeywordWatches.jsx` – lägg till sökord (gated bakom PWA+push), lista med "X nya"-badge, klicka → träfflista (återanvänder `LiveCard` så man kan öppna AI-värdering + "Bevaka pris").
+  - Verifierat backend end-to-end (baslinje 441 moped, ny-detektering via injicerat objekt → matches/unseen ökar, CommHub push HTTP 200, GET detail upplöser objekt) och frontend (flik renderar, gating, inga kompileringsfel). Push-gated create testad med seedad enhets-token.
+
 ## AI-värdering mot egna slutpriser (2026-06)
 Användarens insikt: auktionssajternas faktiska slutpriser är den mest exakta källan till begagnatvärde – bättre än externa sajter. Ny arkitektur:
 - **`sold_items`-kollektion (historik)**: `crawler._cleanup` arkiverar nu varje avslutad auktion med slutpris INNAN den raderas ur flödet. `_archive_sold` gör en **exakt sista-hämtning** (adapter `refresh_item` på den nu stängda sidan) för att fånga vinnande slutbud; faller tillbaka på senast kända bud för sajter utan refresh (Blinto/PS/Tradera/Blocket). Endast objekt med bud (>0) sparas. Fält: `url, source, title, image, final_bid, total_final (inkl. moms+avgift), bid_count, ends_at, sold_at`. Index: unik `url` + text-index på `title`.

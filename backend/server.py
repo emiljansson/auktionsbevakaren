@@ -99,6 +99,10 @@ class LiveAnalyzeReq(BaseModel):
     url: str
 
 
+class KeywordWatchCreate(BaseModel):
+    keyword: str
+
+
 def _key_tokens(title: str):
     """Classify a title's tokens so comparisons lock onto the exact model:
       - model: real model codes (letters+digits, >=3 chars, e.g. R730, FH16,
@@ -576,6 +580,86 @@ async def live_analyze(payload: LiveAnalyzeReq, request: Request, device_id: str
     return {"valuation": val}
 
 
+async def _keyword_matches(keyword: str) -> list:
+    """All matching live items across ALL 10 sources for `keyword`: refresh the
+    on-demand sources (Tradera/Blocket) live, then match the DB on title or the
+    search tag. Returns a list of matching URLs."""
+    key = keyword.strip().lower()[:100]
+    for mod in (tradera, blocket):
+        try:
+            for it in await mod.search(keyword):
+                it["search_q"] = key
+                await crawler._upsert(it)
+        except Exception:
+            logger.exception("keyword live search failed (%s)", getattr(mod, "__name__", "?"))
+    regex = re.escape(keyword.strip()[:100])
+    query = {"$or": [{"title": {"$regex": regex, "$options": "i"}}, {"search_q": key}]}
+    docs = await db.live_auctions.find(query, {"_id": 0, "url": 1}).to_list(5000)
+    return [d["url"] for d in docs]
+
+
+@api_router.post("/keyword-watches")
+async def create_keyword_watch(payload: KeywordWatchCreate, device_id: str = Depends(require_device)):
+    dev = await db.devices.find_one({"device_id": device_id})
+    if not (dev and dev.get("token")):
+        raise HTTPException(status_code=403, detail="Aktivera pushnotiser för att kunna sökbevaka.")
+    kw = (payload.keyword or "").strip()[:100]
+    if len(kw) < 2:
+        raise HTTPException(status_code=400, detail="Ange ett sökord med minst 2 tecken.")
+    if await db.keyword_watches.find_one({"device_id": device_id, "keyword_lower": kw.lower()}):
+        raise HTTPException(status_code=409, detail="Du sökbevakar redan detta ord.")
+    urls = await _keyword_matches(kw)
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "device_id": device_id, "keyword": kw,
+        "keyword_lower": kw.lower(), "created_at": now, "last_check": now,
+        "seen_urls": urls, "matches": [], "unseen_count": 0, "active": True,
+    }
+    await db.keyword_watches.insert_one(doc)
+    return {"id": doc["id"], "keyword": kw, "created_at": now, "last_check": now,
+            "unseen_count": 0, "match_count": 0, "baseline": len(urls)}
+
+
+@api_router.get("/keyword-watches")
+async def list_keyword_watches(device_id: str = Depends(require_device)):
+    out = []
+    async for w in db.keyword_watches.find({"device_id": device_id}).sort("created_at", -1):
+        out.append({"id": w["id"], "keyword": w["keyword"], "created_at": w["created_at"],
+                    "last_check": w.get("last_check"), "unseen_count": w.get("unseen_count", 0),
+                    "match_count": len(w.get("matches", []))})
+    return out
+
+
+@api_router.get("/keyword-watches/{wid}")
+async def get_keyword_watch(wid: str, device_id: str = Depends(require_device)):
+    w = await db.keyword_watches.find_one({"id": wid, "device_id": device_id})
+    if not w:
+        raise HTTPException(status_code=404, detail="Sökbevakning hittades inte.")
+    matches = w.get("matches", [])
+    urls = [m["url"] for m in matches]
+    items = []
+    if urls:
+        found = {}
+        async for d in db.live_auctions.find({"url": {"$in": urls}}, {"_id": 0}):
+            found[d["url"]] = d
+        for m in reversed(matches):  # newest found first
+            d = found.get(m["url"])
+            if d:
+                d["found_at"] = m["found_at"]
+                items.append(d)
+    await db.keyword_watches.update_one({"id": wid}, {"$set": {"unseen_count": 0}})
+    return {"id": w["id"], "keyword": w["keyword"], "created_at": w["created_at"],
+            "last_check": w.get("last_check"), "items": items}
+
+
+@api_router.delete("/keyword-watches/{wid}")
+async def delete_keyword_watch(wid: str, device_id: str = Depends(require_device)):
+    res = await db.keyword_watches.delete_one({"id": wid, "device_id": device_id})
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Sökbevakning hittades inte.")
+    return {"ok": True}
+
+
 app.include_router(api_router)
 _cors_origins = os.environ.get('CORS_ORIGINS', '*').split(',')
 app.add_middleware(
@@ -603,6 +687,12 @@ async def startup():
         logger.exception("could not create sold_items indexes")
     crawler.start()
     asyncio.create_task(_watch_notifier())
+    try:
+        await db.keyword_watches.create_index("device_id")
+        await db.keyword_watches.create_index([("device_id", 1), ("keyword_lower", 1)], unique=True)
+    except Exception:
+        logger.exception("could not create keyword_watches index")
+    asyncio.create_task(_keyword_watch_loop())
 
 
 async def _watch_notifier():
@@ -684,6 +774,49 @@ def _parse_iso(s):
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     except Exception:
         return None
+
+
+async def _run_keyword_check(w, now):
+    urls = set(await _keyword_matches(w["keyword"]))
+    seen = set(w.get("seen_urls", []))
+    new = [u for u in urls if u not in seen]
+    update = {"last_check": now.isoformat(), "seen_urls": list(seen | urls)}
+    if new:
+        matches = w.get("matches", []) + [{"url": u, "found_at": now.isoformat()} for u in new]
+        update["matches"] = matches[-500:]
+        update["unseen_count"] = (w.get("unseen_count", 0) or 0) + len(new)
+        dev = await db.devices.find_one({"device_id": w["device_id"]})
+        token = (dev or {}).get("token")
+        if token and commhub.enabled():
+            n = len(new)
+            body = f"{n} ny{'a' if n != 1 else ''} produkt{'er' if n != 1 else ''} i auktionssystemen"
+            try:
+                await commhub.send_to_token(
+                    token, title=f"🔎 Nya träffar för '{w['keyword']}'", body=body,
+                    data={"type": "keyword_watch", "keyword_watch_id": w["id"]})
+            except Exception:
+                logger.exception("keyword push failed")
+    await db.keyword_watches.update_one({"id": w["id"]}, {"$set": update})
+
+
+async def _keyword_watch_loop():
+    """Every 4h, re-run each saved keyword search across all sources and push the
+    device when genuinely new items (unseen since the watch was created) appear."""
+    await asyncio.sleep(40)
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            async for w in db.keyword_watches.find({"active": {"$ne": False}}):
+                lc = _parse_iso(w.get("last_check"))
+                if lc and (now - lc) < timedelta(hours=4):
+                    continue
+                try:
+                    await _run_keyword_check(w, now)
+                except Exception:
+                    logger.exception("keyword check failed for %s", w.get("keyword"))
+        except Exception:
+            logger.exception("keyword watch loop")
+        await asyncio.sleep(900)  # re-check which watches are due every 15 min
 
 
 @app.on_event("shutdown")
