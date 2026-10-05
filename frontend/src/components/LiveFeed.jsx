@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
-import { RefreshCw, ExternalLink, Plus, Search, Loader2, Coins, Lock } from "lucide-react";
+import { RefreshCw, ExternalLink, Plus, Search, Loader2, Coins, Lock, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,7 @@ const STATUS_CHIP = {
   planned: { cls: "bg-slate-500/15 text-slate-400 border-slate-600/30", label: "Planerad" },
 };
 
-const LiveCard = ({ a, onWatch, watching, locked }) => {
+const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
   const tl = timeLeft(a.ends_at);
   return (
   <motion.div
@@ -84,6 +84,12 @@ const LiveCard = ({ a, onWatch, watching, locked }) => {
           className="h-8 flex-1 bg-amber-500 text-slate-950 hover:bg-amber-600">
           {watching === a.url ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : locked ? <Lock className="mr-1 h-3.5 w-3.5" /> : <Plus className="mr-1 h-3.5 w-3.5" />} Bevaka
         </Button>
+        <Button size="sm" variant="outline" onClick={() => onOpen?.(a)}
+          data-testid={`detail-live-${encodeURIComponent(a.url).slice(-16)}`}
+          title="Detaljer & AI-värdering"
+          className="h-8 border-slate-700 text-violet-300 hover:bg-slate-800">
+          <Sparkles className="h-4 w-4" />
+        </Button>
         <Button size="sm" variant="outline" asChild className="h-8 border-slate-700 text-slate-300 hover:bg-slate-800">
           <a href={a.url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" /></a>
         </Button>
@@ -93,7 +99,7 @@ const LiveCard = ({ a, onWatch, watching, locked }) => {
   );
 };
 
-export const LiveFeed = ({ onWatchAdded }) => {
+export const LiveFeed = ({ onWatchAdded, onOpen }) => {
   const push = usePush();
   const [status, setStatus] = useState(null);
   const [items, setItems] = useState([]);
@@ -221,7 +227,7 @@ export const LiveFeed = ({ onWatchAdded }) => {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" data-testid="live-grid">
-          {items.map((a) => <LiveCard key={a.url} a={a} onWatch={handleWatch} watching={watching} locked={!push?.canWatch} />)}
+          {items.map((a) => <LiveCard key={a.url} a={a} onWatch={handleWatch} watching={watching} locked={!push?.canWatch} onOpen={onOpen} />)}
         </div>
       )}
 

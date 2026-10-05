@@ -26,6 +26,7 @@ export const api = {
   liveAuctions: (params) => axios.get(`${API}/live/auctions`, { params }).then((r) => r.data),
   liveSync: () => axios.post(`${API}/live/sync`).then((r) => r.data),
   liveWatch: (url) => axios.post(`${API}/live/watch`, { url }).then((r) => r.data),
+  liveAnalyze: (url) => axios.post(`${API}/live/analyze`, { url }).then((r) => r.data),
   pushStatus: () => axios.get(`${API}/push/status`).then((r) => r.data),
 };
 

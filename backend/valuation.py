@@ -30,19 +30,35 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-async def valuate(title: str, current_bid: int, source: str, total_now: int) -> dict:
+async def valuate(title: str, current_bid: int, source: str, total_now: int,
+                  comps: list | None = None) -> dict:
+    comps = comps or []
+    comps_block = ""
+    if comps:
+        rows = []
+        for c in comps[:8]:
+            tf = c.get("total_final") or c.get("final_bid")
+            bc = f", {c['bid_count']} bud" if c.get("bid_count") else ""
+            rows.append(f'- "{c.get("title")}" ({c.get("source")}): '
+                        f'slutbud {c.get("final_bid")} SEK, totalt {tf} SEK{bc}')
+        comps_block = (
+            "\n\nVERKLIGA SLUTPRISER från liknande auktioner i vår egen databas. "
+            "Detta är den MEST exakta källan till begagnatvärde – grunda din "
+            "begagnatprisuppskattning (used_price_estimate) PRIMÄRT på dessa "
+            "verkliga slutpriser (t.ex. deras median/nivå):\n" + "\n".join(rows)
+        )
     prompt = f"""Analysera denna auktion och uppskatta marknadsvärde.
 
 Produkt: "{title}"
 Auktionskälla: {source}
 Nuvarande bud: {current_bid} SEK
-Totalpris nu (inkl. moms + avgift): {total_now} SEK
+Totalpris nu (inkl. moms + avgift): {total_now} SEK{comps_block}
 
 Returnera JSON med EXAKT dessa fält:
 {{
   "new_price_estimate": <heltal, uppskattat nypris i SEK>,
-  "used_price_estimate": <heltal, uppskattat begagnatpris i SEK>,
-  "confidence": <heltal 0-100, hur säker du är>,
+  "used_price_estimate": <heltal, uppskattat begagnatpris i SEK – om verkliga slutpriser finns ovan, använd deras nivå>,
+  "confidence": <heltal 0-100; 70-95 om verkliga slutpriser finns, annars 30-60>,
   "currency": "SEK",
   "market_position": "<under | fair | over>",
   "savings_pct": <heltal, hur många % under/över begagnat-marknadsvärde totalpriset ligger, negativt om över>,
@@ -51,16 +67,26 @@ Returnera JSON med EXAKT dessa fält:
     {{"name": "<liknande produkt>", "price": <heltal SEK>, "source": "Google", "condition": "ny"}},
     {{"name": "<liknande begagnad>", "price": <heltal SEK>, "source": "Blocket", "condition": "begagnad"}}
   ],
-  "insight": "<1-2 meningar på svenska, t.ex. 'Budet ligger 18% under marknadsvärde. Bra köpläge.'>"
+  "insight": "<1-2 meningar på svenska. Nämn om bedömningen bygger på verkliga auktionsslutpriser.>"
 }}"""
 
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
-        session_id=f"valuation",
+        session_id="valuation",
         system_message=SYSTEM,
     ).with_model("openai", "gpt-5.4")
 
     resp = await chat.send_message(UserMessage(text=prompt))
     data = _extract_json(resp if isinstance(resp, str) else str(resp))
     data.setdefault("currency", "SEK")
+    # Pass through the REAL sold comparables (not AI-generated) so the UI can
+    # show verified slutpriser alongside the external (Prisjakt/Google) ones.
+    data["sold_comparables"] = [
+        {"title": c.get("title"), "source": c.get("source"),
+         "final_bid": c.get("final_bid"),
+         "total_final": c.get("total_final") or c.get("final_bid"),
+         "bid_count": c.get("bid_count"), "ends_at": c.get("ends_at")}
+        for c in comps[:8]
+    ]
+    data["based_on_real_sales"] = bool(comps)
     return data

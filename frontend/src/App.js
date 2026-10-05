@@ -102,14 +102,20 @@ function App() {
   };
 
   const openDetail = (a) => { setSelected(a); setDetailOpen(true); };
+  const openLiveDetail = (a) => openDetail({ ...a, scraped: true });
 
   const handleAnalyze = async (a) => {
     setAnalyzing(true);
     try {
-      const updated = await api.analyze(a.id);
-      setSelected(updated);
-      setAuctions((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
-      api.stats().then(setStats);
+      if (a.id) {
+        const updated = await api.analyze(a.id);
+        setSelected(updated);
+        setAuctions((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+        api.stats().then(setStats);
+      } else {
+        const res = await api.liveAnalyze(a.url);
+        setSelected((prev) => ({ ...(prev || a), valuation: res.valuation }));
+      }
       toast.success("AI-värdering klar");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "AI-analys misslyckades");
@@ -119,6 +125,7 @@ function App() {
   };
 
   const handleRefresh = async (a) => {
+    if (!a.id) { toast.info("Bevaka objektet för att följa budhistoriken."); return; }
     setRefreshing(true);
     try {
       const updated = await api.refresh(a.id);
@@ -178,7 +185,7 @@ function App() {
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {view === "live" ? (
-          <LiveFeed onWatchAdded={load} />
+          <LiveFeed onWatchAdded={load} onOpen={openLiveDetail} />
         ) : (
         <>
         {/* Stats */}

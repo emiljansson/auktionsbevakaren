@@ -132,10 +132,15 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
             </Button>
           </div>
 
-          {analyzing && <p className="text-sm text-slate-400">AI jämför mot Prisjakt, Google & Blocket...</p>}
+          {analyzing && <p className="text-sm text-slate-400">AI jämför mot verkliga auktionsslutpriser, Prisjakt, Google & Blocket...</p>}
 
           {val && !analyzing && (
             <div className="space-y-4" data-testid="ai-price-estimate">
+              {val.based_on_real_sales && (
+                <Badge data-testid="real-sales-badge" className="border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-semibold text-emerald-300">
+                  ✓ Baserad på verkliga auktionsslutpriser
+                </Badge>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
                   <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Uppskattat nypris</p>
@@ -162,6 +167,28 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
               </div>
 
               <p className="rounded-lg bg-slate-900/60 p-3 text-sm italic text-slate-300">"{val.insight}"</p>
+
+              {val.sold_comparables?.length > 0 && (
+                <div data-testid="sold-comparables">
+                  <p className="mb-2 flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-emerald-400">
+                    <Gavel className="h-3.5 w-3.5" /> Verkliga slutpriser (liknande auktioner)
+                  </p>
+                  <div className="space-y-2">
+                    {val.sold_comparables.map((c, i) => (
+                      <div key={i} className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-slate-200">{c.title}</p>
+                          <span className="text-[11px] text-slate-500">
+                            {c.source}{c.bid_count ? ` · ${c.bid_count} bud` : ""}
+                            {c.ends_at ? ` · ${new Date(c.ends_at).toLocaleDateString("sv-SE", { day: "2-digit", month: "short", year: "2-digit" })}` : ""}
+                          </span>
+                        </div>
+                        <span className="ml-3 font-semibold text-emerald-300">{formatSEK(c.final_bid)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {val.comparables?.length > 0 && (
                 <div>

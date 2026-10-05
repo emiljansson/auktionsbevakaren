@@ -95,6 +95,27 @@ class PushRegister(BaseModel):
     platform: Optional[str] = "web"
 
 
+class LiveAnalyzeReq(BaseModel):
+    url: str
+
+
+async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8):
+    """Find real sold auctions similar to `title` (MongoDB text search on
+    sold_items.title), returning them as grounding comparables for valuation."""
+    if not title or not title.strip():
+        return []
+    try:
+        cursor = db.sold_items.find(
+            {"$text": {"$search": title}},
+            {"score": {"$meta": "textScore"}, "_id": 0, "title": 1, "source": 1,
+             "final_bid": 1, "total_final": 1, "bid_count": 1, "ends_at": 1},
+        ).sort([("score", {"$meta": "textScore"})]).limit(limit)
+        return await cursor.to_list(limit)
+    except Exception:
+        logger.exception("find_comps failed")
+        return []
+
+
 async def require_device(x_device_id: Optional[str] = Header(None)) -> str:
     if not x_device_id:
         raise HTTPException(status_code=400, detail="Enhets-ID saknas.")
@@ -275,8 +296,9 @@ async def analyze_auction(auction_id: str, request: Request, device_id: str = De
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     doc = _clean(doc)
     try:
+        comps = await _find_comps(doc["title"], doc["source"])
         val = await valuation.valuate(
-            doc["title"], doc["current_bid"], doc["source"], doc["total_now"]
+            doc["title"], doc["current_bid"], doc["source"], doc["total_now"], comps
         )
     except Exception:
         logger.exception("Valuation failed")
@@ -476,6 +498,37 @@ async def watch_live(payload: WatchCreate, device_id: str = Depends(require_devi
     return auction
 
 
+@api_router.post("/live/analyze")
+async def live_analyze(payload: LiveAnalyzeReq, request: Request, device_id: str = Depends(require_device)):
+    """AI valuation for ANY live-feed item (no watch required), grounded on real
+    sold prices from our database. Cached on the live doc for 24h to save credits."""
+    _rate_limit(request, "analyze", 30, 60)
+    doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Objektet hittades inte.")
+    cached, vat = doc.get("valuation"), doc.get("valuation_at")
+    if cached and vat:
+        try:
+            if datetime.now(timezone.utc) - datetime.fromisoformat(vat) < timedelta(hours=24):
+                return {"valuation": cached}
+        except Exception:
+            pass
+    try:
+        comps = await _find_comps(doc["title"], doc["source"])
+        val = await valuation.valuate(
+            doc["title"], doc.get("current_bid") or 0, doc["source"],
+            doc.get("total_now") or doc.get("current_bid") or 0, comps
+        )
+    except Exception:
+        logger.exception("Live valuation failed")
+        raise HTTPException(status_code=502, detail="AI-analysen misslyckades. Försök igen senare.")
+    await db.live_auctions.update_one(
+        {"url": payload.url},
+        {"$set": {"valuation": val, "valuation_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"valuation": val}
+
+
 app.include_router(api_router)
 _cors_origins = os.environ.get('CORS_ORIGINS', '*').split(',')
 app.add_middleware(
@@ -496,6 +549,11 @@ async def startup():
     except Exception:
         logger.exception("could not create unique watch index")
     await db.devices.create_index("device_id", unique=True)
+    try:
+        await db.sold_items.create_index("url", unique=True)
+        await db.sold_items.create_index([("title", "text")])
+    except Exception:
+        logger.exception("could not create sold_items indexes")
     crawler.start()
     asyncio.create_task(_watch_notifier())
 

@@ -168,9 +168,20 @@ Användarfråga: "9297 objekt och stiger – riktigt eller loopar indexeringen?"
 - Verifierat: adapter-körning (Klaravik 1959, Retrade 159 alla med ends_at), live-API curl, crawler-loggar (curpage 1..19 → 200 OK, inga 403 med sekventiell hämtning).
 
 ## Nästa steg (kvar)
-- AI-prisvärdering (valuation.py är idag LLM-genererad/uppskattad; jämför ej mot Toolab).
 - Push vid stundande avslut via externt system.
 - Prisfilter/sortering i live-flödet.
+
+## AI-värdering mot egna slutpriser (2026-06)
+Användarens insikt: auktionssajternas faktiska slutpriser är den mest exakta källan till begagnatvärde – bättre än externa sajter. Ny arkitektur:
+- **`sold_items`-kollektion (historik)**: `crawler._cleanup` arkiverar nu varje avslutad auktion med slutpris INNAN den raderas ur flödet. `_archive_sold` gör en **exakt sista-hämtning** (adapter `refresh_item` på den nu stängda sidan) för att fånga vinnande slutbud; faller tillbaka på senast kända bud för sajter utan refresh (Blinto/PS/Tradera/Blocket). Endast objekt med bud (>0) sparas. Fält: `url, source, title, image, final_bid, total_final (inkl. moms+avgift), bid_count, ends_at, sold_at`. Index: unik `url` + text-index på `title`.
+- **Similarity-sökning**: `server._find_comps(title, source)` kör MongoDB text-sök på `sold_items.title`, sorterar på textScore, returnerar topp 8 verkliga sålda objekt som grund.
+- **`valuation.valuate(..., comps)`**: grundar `used_price_estimate` PRIMÄRT på verkliga slutpriser när de finns (confidence 70-95), annars allmän kunskap (confidence 30-60). Behåller externa jämförelser (Prisjakt/Google/Blocket) enligt användarval. Returnerar `sold_comparables` (verkliga, genomsläppta) + `based_on_real_sales`.
+- **Nytt endpoint `POST /api/live/analyze`**: AI-värdering på VALFRITT live-objekt (ingen bevakning krävs), device-scope:at + rate-limitat, cachat på live-dokumentet i 24h för att spara credits. Befintliga bevaknings-analysen (`/auctions/{id}/analyze`) använder nu också comps.
+- **Frontend**: live-korten har en Sparkles-knapp "Detaljer & AI" (`data-testid="detail-live-*"`) som öppnar detaljmodalen; `App.handleAnalyze` grenar på bevakat (id) vs live (url→`liveAnalyze`). `AuctionDetail` visar en grön sektion "Verkliga slutpriser" (`data-testid="sold-comparables"`) + badge "Baserad på verkliga auktionsslutpriser" (`data-testid="real-sales-badge"`), vid sidan av de externa jämförelserna.
+- Verifierat: arkivering (8 sålda fångade med slutpris+avgifter), text-sök-matchning (Lastbil→GMC, Traktorvagn→Bredöls m.fl.), `live/analyze` end-to-end med riktigt LLM-svar (externa comps kvar, based_on_real_sales korrekt), frontend-smoke (modal öppnas från live-kort). Databasen byggs vidare automatiskt varje gång auktioner avslutas.
+
+## Tidigare steg (kvar)
+- AI-prisvärdering byggdes ovan.
 
 ## PS Auction-budget i MongoDB (2026-06)
 Flyttade ScrapingBee-budgetgaten från lokal fil (`/app/.ps_state.json`, försvinner vid pod-omstart/redeploy) till MongoDB så cadencen (72h full / 24h soon) överlever omstarter:

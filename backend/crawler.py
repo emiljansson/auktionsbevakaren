@@ -201,34 +201,76 @@ class Crawler:
             await asyncio.sleep(INTERVAL)
 
     async def _cleanup(self):
-        """Keep the live feed fresh: drop auctions whose end time has passed, and
-        purge on-demand search results (Tradera/Blocket, tagged with search_q)
-        that haven't been re-seen for 24h so stale/one-off searches don't pile up."""
+        """Keep the live feed fresh and build the sold-price history: for each
+        ended auction, archive its final (winning) price into `sold_items`
+        (real comparable data), then drop it from the feed. Also purge on-demand
+        search results (search_q) not re-seen for 24h."""
         now = _now()
         docs = await self.db.live_auctions.find(
-            {"ends_at": {"$ne": None}}, {"url": 1, "ends_at": 1}
+            {"ends_at": {"$ne": None}},
+            {"url": 1, "ends_at": 1, "source": 1, "title": 1, "image": 1,
+             "current_bid": 1, "total_now": 1, "bid_count": 1,
+             "starting_price": 1, "fee_inputs": 1},
         ).to_list(20000)
-        dead = []
+        dead, fetched = [], 0
         for d in docs:
             try:
                 end = datetime.fromisoformat(str(d["ends_at"]).replace("Z", "+00:00"))
                 if end.tzinfo is None:
                     end = end.replace(tzinfo=timezone.utc)
-                if end < now:
-                    dead.append(d["url"])
             except Exception:
                 continue
+            if end >= now:
+                continue
+            dead.append(d["url"])
+            if (d.get("current_bid") or 0) > 0:
+                await self._archive_sold(d, do_fetch=(fetched < 40))
+                fetched += 1
         if dead:
             await self.db.live_auctions.delete_many({"url": {"$in": dead}})
+            dead_set = set(dead)
             for st in self.states:
-                st.queue = [u for u in st.queue if u not in set(dead)]
-            logger.info("Cleanup removed %s ended auctions", len(dead))
+                st.queue = [u for u in st.queue if u not in dead_set]
+            logger.info("Cleanup archived+removed %s ended auctions", len(dead))
         cutoff = (now - timedelta(hours=24)).isoformat()
         stale = await self.db.live_auctions.delete_many(
             {"search_q": {"$nin": [None, ""]}, "last_seen": {"$lt": cutoff}}
         )
         if stale.deleted_count:
             logger.info("Cleanup removed %s stale search results", stale.deleted_count)
+
+    async def _archive_sold(self, doc, do_fetch=True):
+        """Record an ended auction's final winning price into `sold_items`. We do
+        one last fetch of the now-closed page to capture the exact final bid; if
+        the adapter can't refresh (Blinto/PS/Tradera/Blocket) we fall back to the
+        last live bid we observed."""
+        url = doc["url"]
+        final_bid = doc.get("current_bid") or 0
+        total_final = doc.get("total_now") or final_bid
+        if do_fetch:
+            adapter = adapters.adapter_for_source(doc.get("source"))
+            if adapter:
+                try:
+                    res = await adapter.refresh_item(url)
+                    if res and res.get("current_bid"):
+                        final_bid = res["current_bid"]
+                        fee_ctx = {**doc.get("fee_inputs", {}),
+                                   "starting_price": doc.get("starting_price")}
+                        total_final = compute_fees(doc["source"], final_bid, fee_ctx)["total_now"]
+                except Exception:
+                    logger.warning("final fetch failed for %s", url)
+        if final_bid <= 0:
+            return
+        await self.db.sold_items.update_one(
+            {"url": url},
+            {"$set": {
+                "url": url, "source": doc.get("source"), "title": doc.get("title"),
+                "image": doc.get("image"), "final_bid": final_bid,
+                "total_final": total_final, "bid_count": doc.get("bid_count"),
+                "ends_at": doc.get("ends_at"), "sold_at": _iso(),
+            }},
+            upsert=True,
+        )
 
     async def _step(self, st):
         try:
