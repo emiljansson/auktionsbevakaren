@@ -171,6 +171,9 @@ Användarfråga: "9297 objekt och stiger – riktigt eller loopar indexeringen?"
 - Push vid stundande avslut via externt system.
 - Prisfilter/sortering i live-flödet.
 
+## Responsiv header (2026-06)
+Headern var trång på mobil (logo + notis + 3 flikar på en rad, kollision). Omgjord i `App.js`: container `flex-wrap`; rad 1 = logo/titel/"Övervakar X källor" + notis-knapp, rad 2 (mobil) = flik-kontrollen som helbredds-segmenterad kontroll (`order-last w-full`, varje flik `flex-1`). På desktop (`sm:`) återgår flikarna till en inline-rad till höger. Verifierat: ingen header-overflow på 390px eller 1920px; desktop-header 74px (en rad).
+
 ## Tradera/Blocket som källor + Sökbevakning (2026-06)
 - **Tradera & Blocket i Auto-crawler-menyn**: tillagda i `adapters.SOURCE_STATUS` med status `"search"` + notis ("Sök på begäran"). Frontend `STATUS_CHIP.search` (lila chip). De syns nu i Auto-crawler-kortet och källfiltret (headern visar "10 källor"). Förblir sök-på-begäran (inget auto-crawl utan sökord).
 - **Sökbevakning (keyword watch, ny flik)**: bevaka ett sökord i ALLA 10 system; var 4:e timme körs sökningen om och pushnotis skickas OM nya objekt dykt upp sedan start.

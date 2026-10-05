@@ -159,14 +159,14 @@ function App() {
 
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-3 px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-slate-950">
               <Gavel className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate font-heading text-lg font-extrabold leading-none tracking-tight">Auktionsbevakning<span className="text-amber-400">.se</span></h1>
-              <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400">
+              <h1 className="truncate font-heading text-base font-extrabold leading-none tracking-tight sm:text-lg">Auktionsbevakning<span className="text-amber-400">.se</span></h1>
+              <p className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
@@ -175,24 +175,23 @@ function App() {
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <NotifButton />
-            <div className="inline-flex rounded-xl border border-slate-800 bg-[#111827] p-1" data-testid="view-toggle">
+          <NotifButton />
+          <div className="order-last flex w-full rounded-xl border border-slate-800 bg-[#111827] p-1 sm:order-none sm:w-auto" data-testid="view-toggle">
             <button
               onClick={() => setView("live")}
               data-testid="view-live"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:px-4 sm:py-2 ${view === "live" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:flex-none sm:px-4 ${view === "live" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
             >
-              <Radar className="h-4 w-4" /> <span className="hidden sm:inline">Live-flöde</span><span className="sm:hidden">Live</span>
+              <Radar className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Live-flöde</span><span className="sm:hidden">Live</span>
             </button>
             <button
               onClick={() => setView("search")}
               data-testid="view-search"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:px-4 sm:py-2 ${view === "search" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:flex-none sm:px-4 ${view === "search" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
             >
-              <Search className="h-4 w-4" /> <span className="hidden sm:inline">Sökbevakning</span><span className="sm:hidden">Sök</span>
+              <Search className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Sökbevakning</span><span className="sm:hidden">Sök</span>
               {kwUnseen > 0 && (
-                <span data-testid="kw-unseen-badge" className={`ml-0.5 rounded-full px-1.5 text-xs font-bold ${view === "search" ? "bg-slate-900/40 text-slate-950" : "bg-rose-500 text-white"}`}>
+                <span data-testid="kw-unseen-badge" className={`rounded-full px-1.5 text-xs font-bold ${view === "search" ? "bg-slate-900/40 text-slate-950" : "bg-rose-500 text-white"}`}>
                   {kwUnseen}
                 </span>
               )}
@@ -200,11 +199,10 @@ function App() {
             <button
               onClick={() => setView("watch")}
               data-testid="view-watch"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:px-4 sm:py-2 ${view === "watch" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:flex-none sm:px-4 ${view === "watch" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
             >
-              <Layers className="h-4 w-4" /> <span className="hidden sm:inline">Mina bevakningar</span><span className="sm:hidden">Bevakning</span> {stats.total > 0 && <span className="rounded-full bg-slate-900/40 px-1.5 text-xs">{stats.total}</span>}
+              <Layers className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Mina bevakningar</span><span className="sm:hidden">Bevakning</span> {stats.total > 0 && <span className={`rounded-full px-1.5 text-xs ${view === "watch" ? "bg-slate-900/40 text-slate-950" : "bg-slate-800 text-slate-300"}`}>{stats.total}</span>}
             </button>
-            </div>
           </div>
         </div>
       </header>
