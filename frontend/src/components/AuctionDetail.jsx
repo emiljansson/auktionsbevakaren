@@ -61,6 +61,15 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
           <div className="sm:col-span-3 grid grid-cols-2 gap-3">
             <Metric label="Nuvarande bud" value={formatSEK(auction.current_bid)} accent="text-amber-400" />
             <Metric label="Antal bud" value={`${auction.bid_count} st`} />
+            {val?.sold_summary?.count > 0 && (
+              <div className="col-span-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3" data-testid="sold-median-inline">
+                <p className="text-[10px] font-mono uppercase tracking-wider text-emerald-400/80">Median slutpris · exakt modell</p>
+                <div className="flex items-baseline gap-2">
+                  <p className="font-heading text-lg font-bold text-emerald-300">{formatSEK(val.sold_summary.median_final)}</p>
+                  <span className="text-[11px] text-slate-400">{val.sold_summary.count} sålda · {formatSEK(val.sold_summary.min_final)}–{formatSEK(val.sold_summary.max_final)}</span>
+                </div>
+              </div>
+            )}
             <Metric label={`Totalpris ${vatIncl ? "inkl." : "exkl."} moms`} value={formatSEK(bidPriceDisplay)} />
             <Metric label="Slagavgift" value={auction.fee_known ? formatSEK(auction.buyer_fee) : "Tillkommer"} />
             <div className="col-span-2 rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs">

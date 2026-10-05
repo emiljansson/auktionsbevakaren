@@ -89,4 +89,20 @@ Returnera JSON med EXAKT dessa fält:
         for c in comps[:8]
     ]
     data["based_on_real_sales"] = bool(comps)
+    finals = sorted(c.get("final_bid") for c in comps if c.get("final_bid"))
+    totals = sorted((c.get("total_final") or c.get("final_bid")) for c in comps
+                    if (c.get("total_final") or c.get("final_bid")))
+
+    def _median(xs):
+        n = len(xs)
+        if n == 0:
+            return None
+        return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) // 2
+    data["sold_summary"] = {
+        "count": len(finals),
+        "median_final": _median(finals),
+        "median_total": _median(totals),
+        "min_final": finals[0] if finals else None,
+        "max_final": finals[-1] if finals else None,
+    } if finals else None
     return data
