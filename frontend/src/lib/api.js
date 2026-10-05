@@ -29,6 +29,7 @@ export const api = {
   liveAnalyze: (url) => axios.post(`${API}/live/analyze`, { url }).then((r) => r.data),
   deleteSoldItem: (comp) => axios.delete(`${API}/sold-items`, { data: typeof comp === "string" ? { url: comp } : comp }).then((r) => r.data),
   pushStatus: () => axios.get(`${API}/push/status`).then((r) => r.data),
+  importWatches: (fromId) => axios.post(`${API}/account/import`, { from_device_id: fromId }).then((r) => r.data),
   kwList: () => axios.get(`${API}/keyword-watches`).then((r) => r.data),
   kwCreate: (keyword) => axios.post(`${API}/keyword-watches`, { keyword }).then((r) => r.data),
   kwGet: (id) => axios.get(`${API}/keyword-watches/${id}`).then((r) => r.data),

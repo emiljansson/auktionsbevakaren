@@ -97,6 +97,10 @@ class PushRegister(BaseModel):
     platform: Optional[str] = "web"
 
 
+class ImportWatchesReq(BaseModel):
+    from_device_id: str
+
+
 class LiveAnalyzeReq(BaseModel):
     url: str
 
@@ -333,6 +337,44 @@ async def push_register(payload: PushRegister, request: Request, device_id: str 
 async def push_status(x_device_id: Optional[str] = Header(None)):
     dev = await db.devices.find_one({"device_id": x_device_id}) if x_device_id else None
     return {"registered": bool(dev and dev.get("token"))}
+
+
+@api_router.post("/account/import")
+async def import_watches(payload: ImportWatchesReq, device_id: str = Depends(require_device)):
+    """Restore/transfer: copy all watched items + keyword watches from another
+    device code onto THIS device (dedup by url / keyword). Used when a user moves
+    to a new device/install and wants their bevakningar back."""
+    src = (payload.from_device_id or "").strip()
+    if not src or src == device_id:
+        return {"ok": True, "watches": 0, "keywords": 0, "same": src == device_id}
+    existing = set()
+    async for a in db.auctions.find({"device_id": device_id}, {"url": 1}):
+        existing.add(a.get("url"))
+    w = 0
+    async for a in db.auctions.find({"device_id": src}):
+        if a.get("url") in existing:
+            continue
+        a.pop("_id", None)
+        a["device_id"] = device_id
+        await db.auctions.insert_one(a)
+        existing.add(a.get("url"))
+        w += 1
+    existing_kw = set()
+    async for k in db.keyword_watches.find({"device_id": device_id}, {"keyword_lower": 1}):
+        existing_kw.add(k.get("keyword_lower"))
+    kc = 0
+    async for k in db.keyword_watches.find({"device_id": src}):
+        kl = k.get("keyword_lower") or (k.get("keyword") or "").lower().strip()
+        if kl in existing_kw:
+            continue
+        k.pop("_id", None)
+        k["device_id"] = device_id
+        k["id"] = str(uuid.uuid4())
+        await db.keyword_watches.insert_one(k)
+        existing_kw.add(kl)
+        kc += 1
+    return {"ok": True, "watches": w, "keywords": kc}
+
 
 
 # ---------- Routes ----------

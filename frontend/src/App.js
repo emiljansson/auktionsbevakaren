@@ -13,6 +13,7 @@ import KeywordWatches from "@/components/KeywordWatches";
 import { api } from "@/lib/api";
 import { SOURCES, formatSEK } from "@/lib/sources";
 import { PushProvider, usePush } from "@/context/push";
+import { getDeviceId } from "@/lib/push";
 
 const NotifButton = () => {
   const push = usePush();
@@ -55,6 +56,7 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("live");
   const [kwUnseen, setKwUnseen] = useState(0);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => { document.documentElement.classList.add("dark"); }, []);
 
@@ -75,6 +77,22 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (view === "watch") load(); }, [view, load]);
+
+  const handleImport = async () => {
+    const code = "f8d3d881-2af7-4094-8a69-bdc295fcbfde";
+    setImporting(true);
+    try {
+      const res = await api.importWatches(code);
+      if (res.same) toast.info("Det är samma enhet – inget att hämta");
+      else toast.success(`Hämtade ${res.watches} bevakningar och ${res.keywords} sökbevakningar`);
+      await load();
+      loadKwUnseen();
+    } catch (e) {
+      toast.error("Kunde inte hämta bevakningar");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const loadKwUnseen = useCallback(async () => {
     try {
@@ -234,6 +252,19 @@ function App() {
               {SOURCES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
+        </div>
+
+        {/* Restore / transfer watches */}
+        <div className="mb-5 rounded-xl border border-amber-700/40 bg-amber-500/5 p-4" data-testid="restore-panel">
+          <p className="text-sm font-semibold text-amber-300">Återställ mina bevakningar</p>
+          <p className="mt-1 break-all text-xs text-slate-400">
+            Denna enhets kod: <span className="font-mono text-slate-300" data-testid="current-device-id">{getDeviceId()}</span>
+          </p>
+          <p className="mt-2 text-xs text-slate-400">Tryck för att hämta alla dina tidigare bevakningar och sökbevakningar hit.</p>
+          <Button onClick={handleImport} disabled={importing} data-testid="restore-load-button" className="mt-2 bg-amber-500 text-slate-950 hover:bg-amber-600">
+            {importing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+            Ladda mina bevakningar
+          </Button>
         </div>
 
         {/* Grid */}
