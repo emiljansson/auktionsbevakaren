@@ -54,6 +54,7 @@ function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("live");
+  const [kwUnseen, setKwUnseen] = useState(0);
 
   useEffect(() => { document.documentElement.classList.add("dark"); }, []);
 
@@ -74,6 +75,18 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (view === "watch") load(); }, [view, load]);
+
+  const loadKwUnseen = useCallback(async () => {
+    try {
+      const list = await api.kwList();
+      setKwUnseen(list.reduce((s, w) => s + (w.unseen_count || 0), 0));
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    loadKwUnseen();
+    const t = setInterval(loadKwUnseen, 60000);
+    return () => clearInterval(t);
+  }, [loadKwUnseen]);
 
   const handleAdd = async (payload) => {
     setSubmitting(true);
@@ -178,6 +191,11 @@ function App() {
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:px-4 sm:py-2 ${view === "search" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"}`}
             >
               <Search className="h-4 w-4" /> <span className="hidden sm:inline">Sökbevakning</span><span className="sm:hidden">Sök</span>
+              {kwUnseen > 0 && (
+                <span data-testid="kw-unseen-badge" className={`ml-0.5 rounded-full px-1.5 text-xs font-bold ${view === "search" ? "bg-slate-900/40 text-slate-950" : "bg-rose-500 text-white"}`}>
+                  {kwUnseen}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setView("watch")}
@@ -195,7 +213,7 @@ function App() {
         {view === "live" ? (
           <LiveFeed onWatchAdded={load} onOpen={openLiveDetail} />
         ) : view === "search" ? (
-          <KeywordWatches onWatchAdded={load} onOpen={openLiveDetail} />
+          <KeywordWatches onWatchAdded={load} onOpen={openLiveDetail} onUnseenChange={loadKwUnseen} />
         ) : (
         <>
         {/* Stats */}

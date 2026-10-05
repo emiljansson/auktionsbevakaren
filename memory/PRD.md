@@ -179,7 +179,7 @@ Användarfråga: "9297 objekt och stiger – riktigt eller loopar indexeringen?"
   - `server._keyword_matches(keyword)`: live-sök Tradera+Blocket (upsert) + DB-match (titel-regex ELLER search_q) → alla matchande URL:er.
   - `_keyword_watch_loop()` (startup-task): var 15:e min, kör `_run_keyword_check` för watches vars `last_check` > 4h. Nya URL:er (ej i seen_urls) → lägg i matches, öka unseen_count, pusha "🔎 Nya träffar för 'X'" via CommHub.
   - Endpoints (alla device-scope:ade, POST kräver push-token): `POST/GET/GET {id}/DELETE /api/keyword-watches`. GET {id} nollställer unseen_count och returnerar upplösta objekt (nyast först).
-  - Frontend: ny flik "Sökbevakning" (`view-search`), komponent `KeywordWatches.jsx` – lägg till sökord (gated bakom PWA+push), lista med "X nya"-badge, klicka → träfflista (återanvänder `LiveCard` så man kan öppna AI-värdering + "Bevaka pris").
+  - Frontend: ny flik "Sökbevakning" (`view-search`), komponent `KeywordWatches.jsx` – lägg till sökord (gated bakom PWA+push), lista med "X nya"-badge, klicka → träfflista (återanvänder `LiveCard` så man kan öppna AI-värdering + "Bevaka pris"). **Notis-badge på fliken**: App.js summerar osedda träffar över alla sökbevakningar (`kwUnseen`, pollar var 60:e sek via `api.kwList`), röd prick med antal på "Sök"-fliken (`data-testid="kw-unseen-badge"`); nollställs när man öppnar en bevakning (`onUnseenChange`).
   - Verifierat backend end-to-end (baslinje 441 moped, ny-detektering via injicerat objekt → matches/unseen ökar, CommHub push HTTP 200, GET detail upplöser objekt) och frontend (flik renderar, gating, inga kompileringsfel). Push-gated create testad med seedad enhets-token.
 
 ## AI-värdering mot egna slutpriser (2026-06)

@@ -17,7 +17,7 @@ const fmtWhen = (iso) => {
   }
 };
 
-export const KeywordWatches = ({ onWatchAdded, onOpen }) => {
+export const KeywordWatches = ({ onWatchAdded, onOpen, onUnseenChange }) => {
   const push = usePush();
   const locked = !push?.canWatch;
   const [watches, setWatches] = useState([]);
@@ -47,6 +47,7 @@ export const KeywordWatches = ({ onWatchAdded, onOpen }) => {
       const d = await api.kwGet(w.id);
       setSelected(d);
       setWatches((prev) => prev.map((x) => (x.id === w.id ? { ...x, unseen_count: 0 } : x)));
+      onUnseenChange?.();
     } catch {
       toast.error("Kunde inte hämta träffar");
     } finally {
@@ -77,6 +78,7 @@ export const KeywordWatches = ({ onWatchAdded, onOpen }) => {
       setWatches((prev) => prev.filter((x) => x.id !== w.id));
       if (selected?.id === w.id) setSelected(null);
       toast.success("Sökbevakning borttagen");
+      onUnseenChange?.();
     } catch {
       toast.error("Kunde inte ta bort");
     }
