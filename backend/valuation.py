@@ -82,7 +82,7 @@ Returnera JSON med EXAKT dessa fält:
     # Pass through the REAL sold comparables (not AI-generated) so the UI can
     # show verified slutpriser alongside the external (Prisjakt/Google) ones.
     data["sold_comparables"] = [
-        {"title": c.get("title"), "source": c.get("source"),
+        {"url": c.get("url"), "title": c.get("title"), "source": c.get("source"),
          "final_bid": c.get("final_bid"),
          "total_final": c.get("total_final") or c.get("final_bid"),
          "bid_count": c.get("bid_count"), "ends_at": c.get("ends_at")}

@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { Sparkles, Loader2, ExternalLink, RefreshCw, TrendingDown, TrendingUp, Minus, Gavel, Clock } from "lucide-react";
+import { Sparkles, Loader2, ExternalLink, RefreshCw, TrendingDown, TrendingUp, Minus, Gavel, Clock, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { api } from "@/lib/api";
 import { badgeClass, formatSEK, timeLeft } from "@/lib/sources";
 
 const posMeta = {
@@ -34,8 +36,35 @@ const Metric = ({ label, value, accent }) => (
 
 export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefresh, analyzing, refreshing }) => {
   const [vatIncl, setVatIncl] = useState(true);
+  const [removed, setRemoved] = useState(() => new Set());
+  const [removing, setRemoving] = useState(null);
+  useEffect(() => { setRemoved(new Set()); }, [auction?.url]);
   if (!auction) return null;
   const val = auction.valuation;
+  const _median = (xs) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const n = s.length;
+    if (!n) return null;
+    return n % 2 ? s[(n - 1) / 2] : Math.round((s[n / 2 - 1] + s[n / 2]) / 2);
+  };
+  const comps = (val?.sold_comparables || []).filter((c) => !removed.has(c.url));
+  const finals = comps.map((c) => c.final_bid).filter((x) => x > 0);
+  const soldSummary = finals.length
+    ? { count: finals.length, median_final: _median(finals), min_final: Math.min(...finals), max_final: Math.max(...finals) }
+    : null;
+  const handleRemoveComp = async (c) => {
+    if (!c.url) { toast.error("Kan inte ta bort detta objekt"); return; }
+    setRemoving(c.url);
+    try {
+      await api.deleteSoldItem(c.url);
+      setRemoved((prev) => new Set(prev).add(c.url));
+      toast.success("Referensobjekt borttaget – används inte längre vid värdering");
+    } catch {
+      toast.error("Kunde inte ta bort referensobjektet");
+    } finally {
+      setRemoving(null);
+    }
+  };
   const pm = val && posMeta[val.market_position];
   const tl = timeLeft(auction.ends_at);
   const chartData = (auction.bid_history || []).map((b) => ({ ...b }));
@@ -61,12 +90,12 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
           <div className="sm:col-span-3 grid grid-cols-2 gap-3">
             <Metric label="Nuvarande bud" value={formatSEK(auction.current_bid)} accent="text-amber-400" />
             <Metric label="Antal bud" value={`${auction.bid_count} st`} />
-            {val?.sold_summary?.count > 0 && (
+            {soldSummary?.count > 0 && (
               <div className="col-span-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3" data-testid="sold-median-inline">
                 <p className="text-[10px] font-mono uppercase tracking-wider text-emerald-400/80">Median slutpris · exakt modell</p>
                 <div className="flex items-baseline gap-2">
-                  <p className="font-heading text-lg font-bold text-emerald-300">{formatSEK(val.sold_summary.median_final)}</p>
-                  <span className="text-[11px] text-slate-400">{val.sold_summary.count} sålda · {formatSEK(val.sold_summary.min_final)}–{formatSEK(val.sold_summary.max_final)}</span>
+                  <p className="font-heading text-lg font-bold text-emerald-300">{formatSEK(soldSummary.median_final)}</p>
+                  <span className="text-[11px] text-slate-400">{soldSummary.count} sålda · {formatSEK(soldSummary.min_final)}–{formatSEK(soldSummary.max_final)}</span>
                 </div>
               </div>
             )}
@@ -177,14 +206,14 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
 
               <p className="rounded-lg bg-slate-900/60 p-3 text-sm italic text-slate-300">"{val.insight}"</p>
 
-              {val.sold_comparables?.length > 0 && (
+              {comps.length > 0 && (
                 <div data-testid="sold-comparables">
                   <p className="mb-2 flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-emerald-400">
                     <Gavel className="h-3.5 w-3.5" /> Verkliga slutpriser (liknande auktioner)
                   </p>
                   <div className="space-y-2">
-                    {val.sold_comparables.map((c, i) => (
-                      <div key={i} className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm">
+                    {comps.map((c) => (
+                      <div key={c.url || c.title} className="flex items-center justify-between gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-slate-200">{c.title}</p>
                           <span className="text-[11px] text-slate-500">
@@ -192,7 +221,16 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                             {c.ends_at ? ` · ${new Date(c.ends_at).toLocaleDateString("sv-SE", { day: "2-digit", month: "short", year: "2-digit" })}` : ""}
                           </span>
                         </div>
-                        <span className="ml-3 font-semibold text-emerald-300">{formatSEK(c.final_bid)}</span>
+                        <span className="font-semibold text-emerald-300">{formatSEK(c.final_bid)}</span>
+                        <button
+                          onClick={() => handleRemoveComp(c)}
+                          disabled={removing === c.url}
+                          data-testid={`remove-comp-${encodeURIComponent(c.url || "").slice(-16)}`}
+                          title="Ta bort felaktigt referensobjekt"
+                          className="shrink-0 rounded-md p-1.5 text-slate-500 transition hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
+                        >
+                          {removing === c.url ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
                       </div>
                     ))}
                   </div>

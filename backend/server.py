@@ -103,6 +103,10 @@ class KeywordWatchCreate(BaseModel):
     keyword: str
 
 
+class DeleteSoldReq(BaseModel):
+    url: str
+
+
 def _key_tokens(title: str):
     """Classify a title's tokens so comparisons lock onto the exact model:
       - model: real model codes (letters+digits, >=3 chars, e.g. R730, FH16,
@@ -141,7 +145,7 @@ async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8):
     try:
         cursor = db.sold_items.find(
             {"$text": {"$search": search}},
-            {"score": {"$meta": "textScore"}, "_id": 0, "title": 1, "source": 1,
+            {"score": {"$meta": "textScore"}, "_id": 0, "url": 1, "title": 1, "source": 1,
              "final_bid": 1, "total_final": 1, "bid_count": 1, "ends_at": 1},
         ).sort([("score", {"$meta": "textScore"})]).limit(80)
         cands = await cursor.to_list(80)
@@ -658,6 +662,14 @@ async def delete_keyword_watch(wid: str, device_id: str = Depends(require_device
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Sökbevakning hittades inte.")
     return {"ok": True}
+
+
+@api_router.delete("/sold-items")
+async def delete_sold_item(payload: DeleteSoldReq, device_id: str = Depends(require_device)):
+    """Remove a bad/mismatched sold reference so it is no longer used as a price
+    comparable in valuations."""
+    res = await db.sold_items.delete_one({"url": payload.url})
+    return {"ok": True, "deleted": res.deleted_count}
 
 
 app.include_router(api_router)
