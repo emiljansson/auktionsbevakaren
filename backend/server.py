@@ -20,6 +20,7 @@ import scraper
 import valuation
 import tradera
 import blocket
+import auctionet
 import commhub
 from fastapi import Header
 from crawler import Crawler
@@ -38,6 +39,7 @@ logging.basicConfig(level=logging.INFO)
 SOURCE_LIST = list(scraper.SOURCES.values())
 _tradera_seen = {}  # q(lower) -> last upsert timestamp (throttles Tradera fetch)
 _blocket_seen = {}  # q(lower) -> last upsert timestamp (throttles Blocket fetch)
+_auctionet_seen = {}  # q(lower) -> last upsert timestamp (throttles Auctionet fetch)
 
 
 # ---------- Models ----------
@@ -134,6 +136,46 @@ def _key_tokens(title: str):
     return model, brand, weak
 
 
+# Item type/category so a veteran CAR isn't matched with TRUCKS just because both
+# are VOLVO. The leading Swedish type-noun ("Veteranbil", "Kranbil", "Traktor")
+# maps to a coarse group; comps in a different recognised group are excluded.
+_CATEGORY_GROUPS = {
+    # passenger cars
+    "bil": "bil", "personbil": "bil", "veteranbil": "bil", "sportbil": "bil",
+    "sedan": "bil", "kombi": "bil", "halvkombi": "bil", "herrgårdsvagn": "bil",
+    "cab": "bil", "cabriolet": "bil", "coupe": "bil", "coupé": "bil", "suv": "bil",
+    "elbil": "bil", "sportbilar": "bil",
+    # trucks / heavy road vehicles
+    "lastbil": "lastbil", "kranbil": "lastbil", "betongbil": "lastbil",
+    "skåpbil": "lastbil", "flakbil": "lastbil", "tankbil": "lastbil",
+    "dragbil": "lastbil", "sopbil": "lastbil", "timmerbil": "lastbil",
+    "budbil": "lastbil", "tippbil": "lastbil", "lastväxlare": "lastbil",
+    "transportbil": "lastbil", "pickup": "lastbil", "lätt": "lastbil",
+    # tractors
+    "traktor": "traktor", "veterantraktor": "traktor", "traktorgrävare": "traktor",
+    # heavy machines
+    "grävmaskin": "maskin", "bandgrävare": "maskin", "hjulgrävare": "maskin",
+    "minigrävare": "maskin", "hjullastare": "maskin", "grävlastare": "maskin",
+    "lastmaskin": "maskin", "dumper": "maskin", "vält": "maskin", "väghyvel": "maskin",
+    "teleskoplastare": "maskin", "gaffeltruck": "maskin", "truck": "maskin",
+    # trailers / wagons
+    "släp": "slap", "släpvagn": "slap", "traktorvagn": "slap", "kärra": "slap",
+    "trailer": "slap", "vagn": "slap", "husvagn": "slap",
+    # boats, buses, RVs
+    "båt": "bat", "motorbåt": "bat", "segelbåt": "bat", "jolle": "bat",
+    "buss": "buss", "minibuss": "buss", "husbil": "husbil",
+}
+
+
+def _category(title: str):
+    """First recognised Swedish type-noun in the title → coarse group, else None."""
+    for t in re.findall(r"[A-Za-zÅÄÖåäö]+", title or ""):
+        g = _CATEGORY_GROUPS.get(t.lower())
+        if g:
+            return g
+    return None
+
+
 async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8):
     """Find real sold auctions that match `title` NARROWLY. We text-search a broad
     candidate pool, then require each candidate to share the exact model code
@@ -155,11 +197,20 @@ async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8):
         logger.exception("find_comps failed")
         return []
     if not model and not brand:
+        qcat0 = _category(title)
+        if qcat0:
+            cands = [c for c in cands if _category(c.get("title", "")) in (None, qcat0)]
         return cands[:limit]
     model_set, brand_set, weak_set = set(model), set(brand), set(weak)
+    qcat = _category(title)
     scored = []
     for c in cands:
-        cm, cb, cw = _key_tokens(c.get("title", ""))
+        ctitle = c.get("title", "")
+        ccat = _category(ctitle)
+        # Different recognised item type (car vs truck vs tractor) → never a comp.
+        if qcat and ccat and qcat != ccat:
+            continue
+        cm, cb, cw = _key_tokens(ctitle)
         shared_model = model_set & set(cm)
         shared_brand = brand_set & set(cb)
         shared_weak = weak_set & set(cw)
@@ -466,11 +517,19 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
                 _blocket_seen[key] = time.time()
             except Exception:
                 logger.exception("Blocket augment failed")
+        if time.time() - _auctionet_seen.get(key, 0) > 120:
+            try:
+                for it in await auctionet.search(q):
+                    it["search_q"] = key
+                    await crawler._upsert(it)
+                _auctionet_seen[key] = time.time()
+            except Exception:
+                logger.exception("Auctionet augment failed")
     query = {}
     if source and source != "Alla":
         query["source"] = source
     elif not q:
-        query["source"] = {"$nin": ["Tradera", "Blocket"]}  # on-demand sources only appear on search
+        query["source"] = {"$nin": ["Tradera", "Blocket", "Auctionet"]}  # on-demand sources only appear on search
     if q:
         key = q.strip().lower()[:100]
         # Match on title OR items specifically fetched for this search (Tradera/Blocket
@@ -587,11 +646,11 @@ async def live_analyze(payload: LiveAnalyzeReq, request: Request, device_id: str
 
 
 async def _keyword_matches(keyword: str) -> list:
-    """All matching live items across ALL 10 sources for `keyword`: refresh the
-    on-demand sources (Tradera/Blocket) live, then match the DB on title or the
-    search tag. Returns a list of matching URLs."""
+    """All matching live items across ALL sources for `keyword`: refresh the
+    on-demand sources (Tradera/Blocket/Auctionet) live, then match the DB on
+    title or the search tag. Returns a list of matching URLs."""
     key = keyword.strip().lower()[:100]
-    for mod in (tradera, blocket):
+    for mod in (tradera, blocket, auctionet):
         try:
             for it in await mod.search(keyword):
                 it["search_q"] = key

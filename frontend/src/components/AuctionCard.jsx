@@ -76,7 +76,7 @@ export const AuctionCard = ({ auction, onOpen, onDelete }) => {
         </div>
 
         <div className="rounded-lg bg-slate-800/40 px-3 py-2 text-xs text-slate-400" title={auction.fee_note || ""}>
-          {auction.fee_known ? "Att betala (ca)" : "Inkl. moms (+ avgift tillkommer)"}: <span className="font-semibold text-slate-200">{formatSEK(auction.total_now)}</span>
+          {auction.fee_known ? "Att betala (ca)" : auction.fee_approx ? "Att betala (ca, uppskattad avgift)" : "Inkl. moms (+ avgift tillkommer)"}: <span className="font-semibold text-slate-200">{formatSEK(auction.total_now)}</span>
           {auction.fee_note && <p className="mt-0.5 text-[10px] text-slate-500">{auction.fee_note}</p>}
         </div>
 

@@ -75,7 +75,7 @@ export const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
         {!a.fixed_price && (a.current_bid > 0 || a.starting_price > 0) && a.total_now > 0 && (
           <p className="mt-1 text-[10px] text-slate-500" title={a.fee_note || ""}>
             ≈ <span className="font-semibold text-slate-300">{formatSEK(a.total_now)}</span>{" "}
-            {a.fee_known ? "att betala (ca)" : "inkl. moms · + avgift"}
+            {a.fee_known ? "att betala (ca)" : a.fee_approx ? "att betala (ca, uppskattad avgift)" : "inkl. moms · + avgift"}
           </p>
         )}
       </div>

@@ -822,6 +822,7 @@ SOURCE_STATUS = {
     "Riksauktioner": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid & moms via API)."},
     "Tradera": {"status": "search", "note": "Sök på begäran – skriv ett sökord så hämtas Tradera-träffar live (inget automatiskt 'hämta allt'-flöde)."},
     "Blocket": {"status": "search", "note": "Sök på begäran – skriv ett sökord så hämtas Blocket-träffar live (inget automatiskt 'hämta allt'-flöde)."},
+    "Auctionet": {"status": "search", "note": "Sök på begäran – skriv ett sökord så hämtas Auctionet-träffar live (konst, design & antikt). Avgift visas som uppskattning."},
 }
 
 
