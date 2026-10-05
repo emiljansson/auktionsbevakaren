@@ -248,3 +248,10 @@ Mål: grunda AI-värderingar i Auctionets stora arkiv av VERKLIGA slutpriser (ko
 - `server._ingest_auctionet_sold(title)`: bygger en kort query från `_key_tokens` (märke+modell), hämtar Auctionets sålda och upsertar i `sold_items` (samma schema som `_archive_sold`). Körs on-demand i BÅDA analys-endpoints (`/auctions/{id}/analyze` och `/live/analyze`) precis före `_find_comps`, så AI:n väger in dem. Resultatet cachas 24h på objektet.
 - Kategori-spärr utökad med "leksak"-grupp (modellbil/modellfordon/leksaksbil/plåtbil/modell) så en riktig "veteranbil" inte matchas mot Auctionets leksaks-/modellbilar.
 - Verifierat (curl): analys av Auctionet-objekt "Rolex viklås" → 8 sold_comparables alla från Auctionet, `based_on_real_sales=true`, med verkliga slutpriser (951–18 285 kr). Backend frisk.
+
+## Enhetsåterställning: "Ladda mina bevakningar" (2026-06)
+Kontext: preview och produktion använder SEPARATA databaser. En användare byggde bevakningar i preview, gick live (tom prod-DB) och behövde få över dem. localStorage `ab_device_id` är per-origin, så preview- och live-enhets-id skiljer sig.
+- Backend: `POST /api/account/import {from_device_id}` (server.py) kopierar `auctions` + `keyword_watches` från ett annat device_id till det nuvarande (header `X-Device-Id`), dedupe på url / keyword_lower. Kräver ej push-token. Idempotent.
+- Frontend: Panel i "Mina bevakningar"-vyn (App.js) som visar nuvarande `getDeviceId()` ("Denna enhets kod") + knapp "Ladda mina bevakningar" (device-koden är hårdkodad på knappen per användarens önskemål). Ny `api.importWatches(fromId)`.
+- Verifierat i PROD (curl): import 17 bevakningar + 6 sökbevakningar till användarens iPhone-device `9ea92875-...`; push registrerad. Preview-test: 17/6 kopierat, andra körning 0/0 (idempotent).
+- Not: Kan tas bort på begäran. Den hårdkodade koden `f8d3d881-...` i knappen är användarspecifik och bör generaliseras (fält) om funktionen ska vara kvar permanent.
