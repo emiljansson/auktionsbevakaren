@@ -164,6 +164,11 @@ _CATEGORY_GROUPS = {
     # boats, buses, RVs
     "båt": "bat", "motorbåt": "bat", "segelbåt": "bat", "jolle": "bat",
     "buss": "buss", "minibuss": "buss", "husbil": "husbil",
+    # toys / scale models / collectibles — so a real "veteranbil" is NOT matched
+    # with a toy "modellbil" from Auctionet (wildly different price levels).
+    "modellbil": "leksak", "modellbilar": "leksak", "modellfordon": "leksak",
+    "leksaksbil": "leksak", "leksak": "leksak", "modell": "leksak",
+    "plåtbil": "leksak", "plastbil": "leksak",
 }
 
 
@@ -222,6 +227,36 @@ async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8):
         scored.append((len(shared_model) * 4 + len(shared_brand) * 2 + len(shared_weak), c))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [c for _, c in scored[:limit]]
+
+
+async def _ingest_auctionet_sold(title: str):
+    """Ground valuations in Auctionet's REAL ended sales: fetch the archive for
+    this item's key terms (brand+model) and upsert the genuine sales into
+    `sold_items` so `_find_comps` can use them. Runs on-demand per valuation."""
+    if not title or not title.strip():
+        return
+    model, brand, weak = _key_tokens(title)
+    terms = (model + brand) or weak
+    q = " ".join(terms[:4]) if terms else title.strip()[:60]
+    try:
+        sold = await auctionet.fetch_ended(q)
+    except Exception:
+        logger.exception("Auctionet ended ingest failed for %r", q)
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    for it in sold:
+        await db.sold_items.update_one(
+            {"url": it["url"]},
+            {"$set": {
+                "url": it["url"], "source": "Auctionet", "title": it["title"],
+                "image": it.get("image"), "final_bid": it["final_bid"],
+                "total_final": it.get("total_final") or it["final_bid"],
+                "bid_count": it.get("bid_count"), "ends_at": it.get("ends_at"),
+                "sold_at": now,
+            }},
+            upsert=True,
+        )
+
 
 
 async def require_device(x_device_id: Optional[str] = Header(None)) -> str:
@@ -404,6 +439,7 @@ async def analyze_auction(auction_id: str, request: Request, device_id: str = De
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     doc = _clean(doc)
     try:
+        await _ingest_auctionet_sold(doc["title"])
         comps = await _find_comps(doc["title"], doc["source"])
         val = await valuation.valuate(
             doc["title"], doc["current_bid"], doc["source"], doc["total_now"], comps
@@ -630,6 +666,7 @@ async def live_analyze(payload: LiveAnalyzeReq, request: Request, device_id: str
         except Exception:
             pass
     try:
+        await _ingest_auctionet_sold(doc["title"])
         comps = await _find_comps(doc["title"], doc["source"])
         val = await valuation.valuate(
             doc["title"], doc.get("current_bid") or 0, doc["source"],
