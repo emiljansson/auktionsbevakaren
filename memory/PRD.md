@@ -174,6 +174,14 @@ Användarfråga: "9297 objekt och stiger – riktigt eller loopar indexeringen?"
 ## Responsiv header (2026-06)
 Headern var trång på mobil (logo + notis + 3 flikar på en rad, kollision). Omgjord i `App.js`: container `flex-wrap`; rad 1 = logo/titel/"Övervakar X källor" + notis-knapp, rad 2 (mobil) = flik-kontrollen som helbredds-segmenterad kontroll (`order-last w-full`, varje flik `flex-1`). På desktop (`sm:`) återgår flikarna till en inline-rad till höger. Verifierat: ingen header-overflow på 390px eller 1920px; desktop-header 74px (en rad). Dessutom: Auto-crawler-statuskortet i live-flödet döljs på mobil (`hidden sm:block`) för att spara plats.
 
+## Ny källa: Riksauktioner.se (2026-06)
+Riksauktioner är en headless WordPress + Next.js-sajt med ett separat JSON auktions-API på `se01.riksauktioner.se`. Ny `RiksauktionerAdapter` (i `adapters.py`):
+- `discover()`: paginerar `/objects?limit=50&page=N` (~12 sidor, 500+ objekt), behåller `status=="available"`. Fält: titel, `leading_bid`→current_bid, `num_bids_placed`→bid_count, `ending`→ends_at, per-objekt moms (`no_tax=="YES"`→0% annars 25%), objekt-URL `riksauktioner.se/objekt/{id}`.
+- Bilder: bulk-upplösning via `/media?ids=...&limit=N` (≈12 anrop för hela katalogen istället för ett per objekt) → S3 500×500-URL.
+- `refresh_item(url)`: `/objects/{id}` → uppdaterar bud, sluttid, moms.
+- Registrerad i `ENABLED`, `SOURCE_STATUS` (active), `crawler.FEE_CONFIG` (moms 25% + inropsavgift tillkommer). Frontend: tillagd i `SOURCES` + teal-badge. Headern visar nu "11 källor".
+- Verifierat: 513 objekt i flödet, alla med bild, korrekt ekonomi/nedräkning, källfilter + badge fungerar (screenshot).
+
 ## Tradera/Blocket som källor + Sökbevakning (2026-06)
 - **Tradera & Blocket i Auto-crawler-menyn**: tillagda i `adapters.SOURCE_STATUS` med status `"search"` + notis ("Sök på begäran"). Frontend `STATUS_CHIP.search` (lila chip). De syns nu i Auto-crawler-kortet och källfiltret (headern visar "10 källor"). Förblir sök-på-begäran (inget auto-crawl utan sökord).
 - **Sökbevakning (keyword watch, ny flik)**: bevaka ett sökord i ALLA 10 system; var 4:e timme körs sökningen om och pushnotis skickas OM nya objekt dykt upp sedan start.

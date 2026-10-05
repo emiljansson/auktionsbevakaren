@@ -712,10 +712,87 @@ class BlintoAdapter:
         return res or None
 
 
+class RiksauktionerAdapter:
+    """Riksauktioner.se – headless WP + a JSON auction API (se01.riksauktioner.se).
+    Objects are paginated at /objects; images are resolved in bulk via
+    /media?ids=... so we need only ~2 dozen requests for the whole catalogue."""
+    source = "Riksauktioner"
+    api = "https://se01.riksauktioner.se"
+
+    async def _json(self, path, params=None):
+        async with httpx.AsyncClient(headers={**HEADERS, "Accept": "application/json"},
+                                     timeout=25, follow_redirects=True) as c:
+            r = await c.get(self.api + path, params=params)
+            r.raise_for_status()
+            return r.json()
+
+    async def _resolve_images(self, ids):
+        out = {}
+        ids = [str(i) for i in ids if i]
+        for i in range(0, len(ids), 80):
+            batch = ids[i:i + 80]
+            try:
+                d = await self._json("/media", {"ids": ",".join(batch), "limit": len(batch)})
+            except Exception:
+                continue
+            for m in d.get("data", []):
+                sizes = m.get("sizes") or {}
+                out[str(m.get("id"))] = sizes.get("500x500") or sizes.get("1024x1024") or m.get("url")
+        return out
+
+    async def discover(self):
+        first = await self._json("/objects", {"limit": 50, "page": 1})
+        pages = min(int(first.get("pages") or 1), 20)
+        rows = list(first.get("data", []))
+        for p in range(2, pages + 1):
+            await asyncio.sleep(0.2)
+            try:
+                rows += (await self._json("/objects", {"limit": 50, "page": p})).get("data", [])
+            except Exception:
+                continue
+        rows = [o for o in rows if o.get("status") == "available" and not o.get("deleted")]
+        imgs = await self._resolve_images({o.get("thumbnail") for o in rows})
+        out = []
+        for o in rows:
+            oid = o.get("id")
+            if not oid:
+                continue
+            out.append({
+                "source": self.source,
+                "title": (o.get("title") or "Objekt").strip(),
+                "image": imgs.get(str(o.get("thumbnail"))),
+                "current_bid": _to_int(o.get("leading_bid")) or 0,
+                "bid_count": o.get("num_bids_placed"),
+                "ends_at": o.get("ending"),
+                "vat": 0 if o.get("no_tax") == "YES" else 25,
+                "url": f"https://riksauktioner.se/objekt/{oid}",
+            })
+        return out
+
+    async def refresh_item(self, url):
+        m = re.search(r"/objekt/(\d+)", url)
+        if not m:
+            return None
+        try:
+            d = await self._json(f"/objects/{m.group(1)}")
+        except Exception:
+            return None
+        o = d.get("data", d) if isinstance(d, dict) else {}
+        res = {}
+        bid = _to_int(o.get("leading_bid"))
+        if bid is not None:
+            res["current_bid"] = bid
+        if o.get("ending"):
+            res["ends_at"] = o["ending"]
+        if o.get("no_tax") is not None:
+            res["vat"] = 0 if o.get("no_tax") == "YES" else 25
+        return res or None
+
+
 # Active adapters (reliably scrapable server-side, with per-item links)
 ENABLED = [KlaravikAdapter(), BudiAdapter(), FabeoAdapter(),
            RetradeAdapter(), NetauktionAdapter(),
-           TovekAdapter(), BlintoAdapter()]
+           TovekAdapter(), BlintoAdapter(), RiksauktionerAdapter()]
 # PS Auction is crawled on a dedicated background task (see crawler._ps_loop)
 # because its ScrapingBee crawl is slow and would block the per-tick loop.
 
@@ -729,6 +806,7 @@ SOURCE_STATUS = {
     "Tovek": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid, moms & slagavgift)."},
     "PS Auction": {"status": "active", "note": "Automatisk bevakning via renderande proxy (löser AWS WAF). Uppdateras var ~4:e timme."},
     "Blinto": {"status": "active", "note": "Automatisk bevakning aktiv (via renderande proxy som löser anti-bot)."},
+    "Riksauktioner": {"status": "active", "note": "Automatisk bevakning aktiv (bud, sluttid & moms via API)."},
     "Tradera": {"status": "search", "note": "Sök på begäran – skriv ett sökord så hämtas Tradera-träffar live (inget automatiskt 'hämta allt'-flöde)."},
     "Blocket": {"status": "search", "note": "Sök på begäran – skriv ett sökord så hämtas Blocket-träffar live (inget automatiskt 'hämta allt'-flöde)."},
 }
