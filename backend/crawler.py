@@ -43,7 +43,8 @@ FEE_CONFIG = {
     "Retrade":     {"vat": 25, "note": "Moms 25% + auktionsavgift + 250 kr/faktura tillkommer"},
     "Tovek":       {"vat": 25, "note": "Moms 25% + fast slagavgift tillkommer (se auktionssidan)"},
     "Tradera":     {"vat": 0,  "fee_pct": 0, "fee_min": 0, "note": "Privatköp – pris som visat (ingen slagavgift)"},
-    "Riksauktioner": {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (se auktionssidan)"},
+    "Riksauktioner": {"vat": 25, "fee_pct": 12, "fee_min": 120, "fee_max": 25000,
+                      "note": "Moms 25% + klubbavgift 12% (min 120 kr, max 25 000 kr) inkl. moms"},
 }
 
 

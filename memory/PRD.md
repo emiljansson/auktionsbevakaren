@@ -179,8 +179,9 @@ Riksauktioner är en headless WordPress + Next.js-sajt med ett separat JSON aukt
 - `discover()`: paginerar `/objects?limit=50&page=N` (~12 sidor, 500+ objekt), behåller `status=="available"`. Fält: titel, `leading_bid`→current_bid, `num_bids_placed`→bid_count, `ending`→ends_at, per-objekt moms (`no_tax=="YES"`→0% annars 25%), objekt-URL `riksauktioner.se/objekt/{id}`.
 - Bilder: bulk-upplösning via `/media?ids=...&limit=N` (≈12 anrop för hela katalogen istället för ett per objekt) → S3 500×500-URL.
 - `refresh_item(url)`: `/objects/{id}` → uppdaterar bud, sluttid, moms.
-- Registrerad i `ENABLED`, `SOURCE_STATUS` (active), `crawler.FEE_CONFIG` (moms 25% + inropsavgift tillkommer). Frontend: tillagd i `SOURCES` + teal-badge. Headern visar nu "11 källor".
-- Verifierat: 513 objekt i flödet, alla med bild, korrekt ekonomi/nedräkning, källfilter + badge fungerar (screenshot).
+- Registrerad i `ENABLED`, `SOURCE_STATUS` (active), `crawler.FEE_CONFIG`. Frontend: tillagd i `SOURCES` + teal-badge. Headern visar nu "11 källor".
+- **Exakt inropsavgift (klubbavgift)**: hämtad från sajtens FAQ: 12% av klubbat pris, min 120 kr, max 25 000 kr, exkl. moms (dvs +25% moms även på avgiften). Konfigurerad i `FEE_CONFIG` som `fee_pct:12, fee_min:120, fee_max:25000` (fee_vat=25 default). Per-objekt moms via `no_tax` (0/25). `fee_known=True` → "🪙 Inkl. avgift"-badge + exakt totalpris visas. 530 befintliga objekt omräknade; nya beräknas automatiskt.
+- Verifierat: 513+ objekt i flödet, alla med bild + guldmynt-badge (120/120 i filtret), korrekt total (bud 50 → 212 kr), källfilter fungerar (screenshot).
 
 ## Tradera/Blocket som källor + Sökbevakning (2026-06)
 - **Tradera & Blocket i Auto-crawler-menyn**: tillagda i `adapters.SOURCE_STATUS` med status `"search"` + notis ("Sök på begäran"). Frontend `STATUS_CHIP.search` (lila chip). De syns nu i Auto-crawler-kortet och källfiltret (headern visar "10 källor"). Förblir sök-på-begäran (inget auto-crawl utan sökord).
