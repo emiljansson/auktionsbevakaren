@@ -118,12 +118,17 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
   srcRef.current = source;
   const pageRef = useRef(page);
   pageRef.current = page;
+  // "Frozen snapshot" of when the feed was opened. The order & item set stay fixed
+  // to this moment while browsing/paging so nothing jumps around. A new snapshot is
+  // taken only on manual refresh, source change, search or sync.
+  const snapRef = useRef(new Date().toISOString());
+  const resnap = () => { snapRef.current = new Date().toISOString(); };
 
   const load = useCallback(async () => {
     try {
       const [st, resp] = await Promise.all([
         api.liveStatus(),
-        api.liveAuctions({ source: srcRef.current, q: qRef.current || undefined, page: pageRef.current, page_size: 100 }),
+        api.liveAuctions({ source: srcRef.current, q: qRef.current || undefined, page: pageRef.current, page_size: 100, snapshot: snapRef.current }),
       ]);
       setStatus(st);
       setItems(resp.items || []);
@@ -142,8 +147,8 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
     return () => clearInterval(t);
   }, [load]);
 
-  // Reset to first page when the filter changes; reload on page/source change.
-  useEffect(() => { setPage(1); }, [source]);
+  // Reset to first page + take a fresh snapshot when the source filter changes.
+  useEffect(() => { resnap(); setPage(1); }, [source]);
   useEffect(() => { load(); }, [source, page, load]);
   // Jump back to the top when the user changes page so they don't lose their place.
   useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [page]);
@@ -153,7 +158,7 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
     try {
       await api.liveSync();
       toast.success("Synkning startad – nya objekt dyker upp strax");
-      setTimeout(load, 3000);
+      setTimeout(() => { resnap(); load(); }, 3000);
     } catch {
       toast.error("Kunde inte starta synkning");
     } finally {
@@ -212,7 +217,7 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (setPage(1), load())}
+          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (resnap(), setPage(1), load())}
             placeholder="Sök i live-flödet (t.ex. grävmaskin, traktor)..." data-testid="live-search"
             className="border-slate-700 bg-slate-900 pl-9 text-slate-100 placeholder:text-slate-600" />
         </div>
@@ -223,7 +228,7 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
             {Object.keys(sources).map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Button variant="outline" onClick={load} className="border-slate-700 text-slate-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" /></Button>
+        <Button variant="outline" onClick={() => { resnap(); setPage(1); load(); }} title="Uppdatera flödet" className="border-slate-700 text-slate-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" /></Button>
       </div>
 
       {loading ? (

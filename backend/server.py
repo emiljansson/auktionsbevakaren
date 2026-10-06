@@ -726,7 +726,7 @@ async def live_status():
 
 
 @api_router.get("/live/auctions")
-async def live_auctions(request: Request, source: Optional[str] = None, q: Optional[str] = None, page: int = 1, page_size: int = 100):
+async def live_auctions(request: Request, source: Optional[str] = None, q: Optional[str] = None, page: int = 1, page_size: int = 100, snapshot: Optional[str] = None):
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
     # On search, augment the feed with live Tradera + Blocket results (not background-crawled).
@@ -775,8 +775,7 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
     now = datetime.now(timezone.utc)
     far = datetime.max.replace(tzinfo=timezone.utc)
 
-    def end_dt(d):
-        e = d.get("ends_at")
+    def _parse_dt(e):
         if not e:
             return None
         try:
@@ -785,9 +784,33 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
         except Exception:
             return None
 
-    # Keep only ongoing (no end time, or end time in the future).
-    live = [d for d in docs if (end_dt(d) is None or end_dt(d) > now)]
+    def end_dt(d):
+        return _parse_dt(d.get("ends_at"))
+
+    # "Frozen snapshot" feed: the client sends the time it first opened the feed.
+    # We freeze both the item SET and ORDER to that moment so nothing jumps between
+    # pages while browsing. Items that end during the session stay in place and are
+    # flagged `ended` (shown as "Avslutad"); the feed only changes on reload (new snapshot).
+    snap = _parse_dt(snapshot) or now
+
+    def still_in_feed(d):
+        ed = end_dt(d)
+        # Drop items already ended at snapshot time; keep future-ending ones even
+        # after they expire mid-session (they get marked ended instead of removed).
+        if ed is not None and ed <= snap:
+            return False
+        if not q:
+            # Freeze the set: don't inject items discovered after the snapshot.
+            fs = _parse_dt(d.get("first_seen"))
+            if fs is not None and fs > snap:
+                return False
+        return True
+
+    live = [d for d in docs if still_in_feed(d)]
     live.sort(key=lambda d: (end_dt(d) is None, end_dt(d) or far))
+    for d in live:
+        ed = end_dt(d)
+        d["ended"] = bool(ed is not None and ed <= now)
     if q:
         # On search, round-robin across sources so on-demand fixed-price results
         # (Blocket, Tradera "köp nu") surface near the top instead of being
