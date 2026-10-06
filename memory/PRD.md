@@ -301,3 +301,12 @@ Användare: "Toveks slagavgift är 400kr och inte 500kr som det står i gränssn
 - DB-backfill (preview): satte `buyer_fee_excl` + ny not på 1962 live_auctions + 8 auctions som saknade fältet (avslutade objekt crawlas ej om). Thule-objektet: buyer_fee=500, buyer_fee_excl=400, not korrekt.
 - Verifierat (API + skärmdump): Thule-detaljvyn visar "Slagavgift (exkl. moms) 400 kr", totalpris inkl. moms 3 625 kr. Gäller alla sajter (slagavgift visas nu exkl. moms, som auktionshusen själva anger).
 - Kvarstår (ej rapporterat, ej åtgärdat): (a) appens sista kända bud var 2 500 kr men vinnande klubbslag blev 2 600 kr (appen missade sista budet på avslutat objekt); (b) Toveks expeditionsavgift (~30 kr + moms) ingår inte i totalen. Kräver ompublicering för live.
+
+## Avslutade bevakningar: ingen "Avslutad"-stämpel, låg kvar för alltid, fel ordning (2026-06)
+Användare (livesiten): avslutade objekt låg kvar under Bevakning, utan klocka och utan "Avslutad"-stämpel; en Blocket-annons utan klocka låg oförklarligt sist. Rotorsak: `watch_live` sparade aldrig `ends_at` på bevakningen; när objektet slutade raderades dess `live_auctions`-post → bevakningen tappade sin sluttid → `timeLeft()` i frontend fick null → ingen klocka/stämpel, och ingen städning kunde veta att det tagit slut. Blocket-annonser saknar sluttid helt (radannonser) → naturligt ingen klocka.
+Val (användare): auto-ta-bort 24h efter avslut; avslutade sorteras lägre. Fix:
+- `watch_live` (server.py): sparar nu `ends_at` vid bevakningstillfället.
+- `crawler._cleanup`: när ett objekt slutar stämplas final `ends_at`+bud/total på alla bevakningskopior (via url) INNAN live-posten raderas; dessutom tas bevakningar bort som slutade för >24h sedan (endast de MED sluttid → Blocket/no-end rörs aldrig).
+- `list_auctions` (server.py): om live-post saknas hämtas `ends_at`/bud/avgift från `sold_items`-arkivet (läs-tid) så "Avslutad"-stämpeln + sortering funkar direkt även för redan raderade objekt. Ny sortering: aktiva (snart först) → avslutade (senast avslutad först) → utan sluttid (Blocket) sist.
+- Startup-task `_backfill_watch_ends_at` (server.py): fyller `ends_at` på gamla bevakningar från `sold_items` → självläker de 2 föräldralösa objekten på livesidan vid ompublicering.
+- Verifierat: API-simulering (aktiv/avslutad-2h/avslutad-48h/Blocket) ger rätt ordning + ends_at-återställning; backfill återställer B,C (ej Blocket); 24h-städning tar bort endast 48h-objektet; UI-skärmdump: 6 "Avslutad"-stämplar syns, aktiva först, Blocket sist. Kräver ompublicering för live.

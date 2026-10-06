@@ -527,22 +527,38 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
                              return_exceptions=True)
         async for lv in db.live_auctions.find({"url": {"$in": unknown}}, {"_id": 0}):
             live_map[lv["url"]] = lv
+    # Fall back to the sold-items archive for items whose live doc was already
+    # purged (they have ended) so the card still shows its end time + "Avslutad".
+    missing = [d.get("url") for d in docs
+               if d.get("url") and d["url"] not in live_map]
+    sold_map = {}
+    if missing:
+        async for sd in db.sold_items.find({"url": {"$in": missing}}, {"_id": 0}):
+            sold_map[sd["url"]] = sd
     for d in docs:
         lv = live_map.get(d.get("url"))
-        if not lv:
+        if lv:
+            for k in ("current_bid", "starting_price", "vat", "buyer_fee",
+                      "buyer_fee_excl", "fee_known", "fee_note", "total_now",
+                      "ends_at", "bid_count"):
+                if lv.get(k) is not None:
+                    d[k] = lv[k]
+            d["bid_count"] = _real_bid_count(lv)
+            d["bid_history"] = _bid_history(lv)
             continue
-        for k in ("current_bid", "starting_price", "vat", "buyer_fee",
-                  "buyer_fee_excl", "fee_known", "fee_note", "total_now",
-                  "ends_at", "bid_count"):
-            if lv.get(k) is not None:
-                d[k] = lv[k]
-        d["bid_count"] = _real_bid_count(lv)
-        d["bid_history"] = _bid_history(lv)
-    # Soonest-ending first; items without an end time go last. Parse to real
-    # datetimes so mixed ISO formats (Z vs +02:00) sort chronologically, not as
-    # raw strings.
-    far = datetime.max.replace(tzinfo=timezone.utc)
-    docs.sort(key=lambda d: _parse_iso(d.get("ends_at")) or far)
+        sd = sold_map.get(d.get("url"))
+        if sd and sd.get("ends_at") and not d.get("ends_at"):
+            d["ends_at"] = sd["ends_at"]  # ended -> restore end time for badge/sort
+    # Sort: active items soonest-first, then ended (most recent first), then
+    # items with no end time at all (e.g. Blocket classifieds) last.
+    now_ts = datetime.now(timezone.utc)
+
+    def _order(d):
+        e = _parse_iso(d.get("ends_at"))
+        if e is None:
+            return (2, 0.0)
+        return (0, e.timestamp()) if e >= now_ts else (1, -e.timestamp())
+    docs.sort(key=_order)
     return [Auction(**_clean(d)) for d in docs]
 
 
@@ -810,6 +826,7 @@ async def watch_live(payload: WatchCreate, device_id: str = Depends(require_devi
         buyer_fee_excl=doc.get("buyer_fee_excl"),
         fee_known=doc.get("fee_known", True), fee_note=doc.get("fee_note"),
         total_now=doc.get("total_now", doc["current_bid"]),
+        ends_at=doc.get("ends_at"),
         url=doc["url"], scraped=True, bid_history=history,
     )
     await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id})
@@ -967,6 +984,7 @@ async def startup():
         logger.exception("could not create sold_items indexes")
     crawler.start()
     asyncio.create_task(_dedupe_device_tokens())
+    asyncio.create_task(_backfill_watch_ends_at())
     asyncio.create_task(_watch_notifier())
     try:
         await db.keyword_watches.create_index("device_id")
@@ -974,6 +992,29 @@ async def startup():
     except Exception:
         logger.exception("could not create keyword_watches index")
     asyncio.create_task(_keyword_watch_loop())
+
+
+async def _backfill_watch_ends_at():
+    """Self-heal (runs at startup, idempotent): older watched items were saved
+    without an end time, and once their live doc was purged they lost it too —
+    showing no countdown and no "Avslutad" badge. Restore ends_at from the
+    sold-items archive so those ended items display correctly and the 24h
+    watch-cleanup can eventually remove them. Blocket/no-end items have no sold
+    record, so they are left untouched."""
+    await asyncio.sleep(12)
+    try:
+        filled = 0
+        async for a in db.auctions.find({"ends_at": {"$in": [None, ""]}},
+                                        {"url": 1}):
+            sd = await db.sold_items.find_one({"url": a.get("url")}, {"ends_at": 1})
+            if sd and sd.get("ends_at"):
+                await db.auctions.update_one(
+                    {"_id": a["_id"]}, {"$set": {"ends_at": sd["ends_at"]}})
+                filled += 1
+        if filled:
+            logger.info("backfill_watch_ends_at: restored end time on %d items", filled)
+    except Exception:
+        logger.exception("backfill_watch_ends_at")
 
 
 async def _dedupe_device_tokens():

@@ -239,6 +239,16 @@ class Crawler:
             if end >= now:
                 continue
             dead.append(d["url"])
+            # Preserve the final end time + price on any watched copies so the
+            # watchlist keeps showing "Avslutad" + end time after the live doc
+            # is purged (and so the 24h watch-cleanup below can act on it).
+            await self.db.auctions.update_many(
+                {"url": d["url"]},
+                {"$set": {"ends_at": d.get("ends_at"),
+                          "current_bid": d.get("current_bid"),
+                          "total_now": d.get("total_now"),
+                          "bid_count": d.get("bid_count")}},
+            )
             if (d.get("current_bid") or 0) > 0:
                 await self._archive_sold(d, do_fetch=(fetched < 40))
                 fetched += 1
@@ -248,6 +258,24 @@ class Crawler:
             for st in self.states:
                 st.queue = [u for u in st.queue if u not in dead_set]
             logger.info("Cleanup archived+removed %s ended auctions", len(dead))
+        # Remove watched items that ended more than 24h ago (recently-won items
+        # stay visible for a day, then self-clean). Only items WITH an end time
+        # are touched, so Blocket/no-end classifieds are never auto-removed.
+        wcutoff = now - timedelta(hours=24)
+        removed = 0
+        async for a in self.db.auctions.find(
+                {"ends_at": {"$nin": [None, ""]}}, {"ends_at": 1}):
+            try:
+                e = datetime.fromisoformat(str(a["ends_at"]).replace("Z", "+00:00"))
+                if e.tzinfo is None:
+                    e = e.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            if e < wcutoff:
+                await self.db.auctions.delete_one({"_id": a["_id"]})
+                removed += 1
+        if removed:
+            logger.info("Cleanup removed %s watched items ended >24h ago", removed)
         cutoff = (now - timedelta(hours=24)).isoformat()
         stale = await self.db.live_auctions.delete_many(
             {"search_q": {"$nin": [None, ""]}, "last_seen": {"$lt": cutoff}}
