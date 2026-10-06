@@ -56,6 +56,8 @@ function App() {
   const [view, setView] = useState("live");
   const [kwUnseen, setKwUnseen] = useState(0);
   const [accountName, setAccountName] = useState("");
+  const [savedName, setSavedName] = useState("");
+  const [showAccountPanel, setShowAccountPanel] = useState(false);
   const [accountPin, setAccountPin] = useState("");
   const [hasPin, setHasPin] = useState(false);
   const [savingName, setSavingName] = useState(false);
@@ -82,7 +84,7 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (view === "watch") load(); }, [view, load]);
-  useEffect(() => { api.getAccountName().then((d) => { setAccountName(d.name || ""); setHasPin(!!d.has_pin); }).catch(() => {}); }, []);
+  useEffect(() => { api.getAccountName().then((d) => { setAccountName(d.name || ""); setSavedName(d.name || ""); setHasPin(!!d.has_pin); setShowAccountPanel(!d.name); }).catch(() => {}); }, []);
 
   const handleSaveName = async () => {
     const name = accountName.trim();
@@ -94,6 +96,8 @@ function App() {
       const res = await api.setAccountName(name, pin);
       setHasPin(!!res.has_pin);
       setAccountPin("");
+      setSavedName(name);
+      setShowAccountPanel(false);
       toast.success("Kontonamn sparat - använd namn" + (res.has_pin ? " + PIN" : "") + " för att återställa på en ny enhet");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Kunde inte spara kontonamnet");
@@ -285,7 +289,17 @@ function App() {
         </div>
 
         {/* Account name (password-less backup) – shown when you have watches */}
-        {auctions.length > 0 && (
+        {auctions.length > 0 && (savedName && !showAccountPanel ? (
+          <div className="mb-5 flex items-center justify-between gap-2 rounded-xl border border-slate-800 bg-[#111827] px-4 py-3" data-testid="account-name-summary">
+            <p className="truncate text-sm text-slate-300">
+              Konto: <span className="font-semibold text-slate-100">{savedName}</span>
+              {hasPin && <span className="ml-1.5 text-emerald-400">🔒</span>}
+            </p>
+            <button onClick={() => setShowAccountPanel(true)} data-testid="account-name-edit" className="shrink-0 text-sm font-semibold text-amber-400 hover:text-amber-300">
+              Ändra
+            </button>
+          </div>
+        ) : (
           <div className="mb-5 rounded-xl border border-slate-800 bg-[#111827] p-4" data-testid="account-name-panel">
             <p className="text-sm font-semibold text-slate-200">Ditt kontonamn</p>
             <p className="mt-1 text-xs text-slate-400">Välj ett namn och (valfritt) en 4-siffrig PIN så kan du återställa alla dina bevakningar på en ny enhet.</p>
@@ -312,8 +326,13 @@ function App() {
               </Button>
             </div>
             {hasPin && <p className="mt-1.5 text-[11px] text-emerald-400">🔒 Skyddat med PIN-kod</p>}
+            {savedName && (
+              <button onClick={() => { setShowAccountPanel(false); setAccountName(savedName); setAccountPin(""); }} data-testid="account-name-cancel" className="mt-2 text-xs text-slate-500 hover:text-slate-300">
+                Avbryt
+              </button>
+            )}
           </div>
-        )}
+        ))}
 
         {/* Grid */}
         {loading ? (
