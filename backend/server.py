@@ -719,7 +719,10 @@ async def stats(x_device_id: Optional[str] = Header(None)):
 # ---------- Live auto-crawl ----------
 @api_router.get("/live/status")
 async def live_status():
-    count = await db.live_auctions.count_documents({})
+    # Count only what the default live feed actually shows: background-crawled
+    # sources (Tradera/Blocket/Auctionet are on-demand/search-only), matching the
+    # feed's total so the status number and the feed total stay consistent.
+    count = await db.live_auctions.count_documents({"source": {"$nin": ["Tradera", "Blocket", "Auctionet"]}})
     s = crawler.status()
     s["live_count"] = count
     return s
@@ -771,7 +774,7 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
             {"title": {"$regex": re.escape(q.strip()[:100]), "$options": "i"}},
             {"search_q": key},
         ]
-    docs = await db.live_auctions.find(query, {"_id": 0}).sort("ends_at", 1).to_list(5000)
+    docs = await db.live_auctions.find(query, {"_id": 0}).sort("ends_at", 1).to_list(30000)
     now = datetime.now(timezone.utc)
     far = datetime.max.replace(tzinfo=timezone.utc)
 

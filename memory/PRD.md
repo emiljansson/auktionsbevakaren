@@ -356,3 +356,8 @@ Användare upplevde att "nya okända objekt dyker upp hela tiden" vid skroll. Or
 - Backend `GET /api/live/auctions` (server.py ~728): ny param `snapshot` (ISO). Filter använder snapshot-tiden i stället för `now`: behåller objekt vars `ends_at > snapshot` (avslutade mellan snapshot och nu ligger kvar) + fryser mängden via `first_seen <= snapshot` (ej på sök). Sort `ends_at` asc (tidsoberoende = stabil). Varje objekt får `ended`-flagga (beräknad mot verkliga `now`).
 - Frontend `LiveFeed.jsx`: `snapRef` (ISO) sätts vid mount och nollställs (ny snapshot) endast vid: källbyte, sök (Enter), manuell uppdatering (refresh-knapp), och synk. Sidbyte och 10s-polling behåller samma snapshot → inget hoppar, bara "Avslutad"-badge tänds (via `timeLeft`). Refresh-knappen hoppar även till sida 1.
 - Verifierat: samma snapshot → identisk ordning vid upprepade anrop, 12 avslutade kvar+markerade; färsk snapshot → avslutade borta (0). UI: sidnavigering "Sida 2 av 50 · 4987 objekt" fungerar, inga JS-fel. Kräver ompublicering för live.
+
+## 2026-10-06 — FIX: Flödet visade bara 4987 av ~12k objekt
+- Orsak 1: `GET /api/live/auctions` kapade `.to_list(5000)` → bara de 5000 snarast-slutande hämtades, resten föll bort. Höjt till 30000 (täcker alla ~9800 bakgrundsobjekt; svarstid ~0,26s).
+- Orsak 2: statusradens `live_count` räknade HELA collection (12392, inkl. on-demand Tradera/Blocket/Auctionet + avslutade) medan flödet exkluderar on-demand → användaren jämförde 12382 mot 4987. `GET /api/live/status` räknar nu bara bakgrundskällor (`$nin` on-demand) så siffran matchar flödets total.
+- Resultat: statusrad = flödets total = ~9767 objekt (98 sidor). On-demand-källor (Tradera/Blocket/Auctionet, ~2570) visas fortfarande bara vid sökning. Verifierat via API + UI.
