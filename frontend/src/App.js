@@ -10,6 +10,7 @@ import AddAuctionModal from "@/components/AddAuctionModal";
 import AuctionDetail from "@/components/AuctionDetail";
 import LiveFeed from "@/components/LiveFeed";
 import KeywordWatches from "@/components/KeywordWatches";
+import { AccountNamePanel, RestoreByNamePanel } from "@/components/AccountTools";
 import { api } from "@/lib/api";
 import { SOURCES, formatSEK } from "@/lib/sources";
 import { PushProvider, usePush } from "@/context/push";
@@ -55,15 +56,6 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("live");
   const [kwUnseen, setKwUnseen] = useState(0);
-  const [accountName, setAccountName] = useState("");
-  const [savedName, setSavedName] = useState("");
-  const [showAccountPanel, setShowAccountPanel] = useState(false);
-  const [accountPin, setAccountPin] = useState("");
-  const [hasPin, setHasPin] = useState(false);
-  const [savingName, setSavingName] = useState(false);
-  const [restoreName, setRestoreName] = useState("");
-  const [restorePin, setRestorePin] = useState("");
-  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => { document.documentElement.classList.add("dark"); }, []);
 
@@ -84,49 +76,6 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (view === "watch") load(); }, [view, load]);
-  useEffect(() => { api.getAccountName().then((d) => { setAccountName(d.name || ""); setSavedName(d.name || ""); setHasPin(!!d.has_pin); setShowAccountPanel(!d.name); }).catch(() => {}); }, []);
-
-  const handleSaveName = async () => {
-    const name = accountName.trim();
-    if (name.length < 2) { toast.error("Ange minst 2 tecken"); return; }
-    const pin = accountPin.trim();
-    if (pin && !/^\d{4}$/.test(pin)) { toast.error("PIN-koden måste vara 4 siffror"); return; }
-    setSavingName(true);
-    try {
-      const res = await api.setAccountName(name, pin);
-      setHasPin(!!res.has_pin);
-      setAccountPin("");
-      setSavedName(name);
-      setShowAccountPanel(false);
-      toast.success("Kontonamn sparat - använd namn" + (res.has_pin ? " + PIN" : "") + " för att återställa på en ny enhet");
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Kunde inte spara kontonamnet");
-    } finally {
-      setSavingName(false);
-    }
-  };
-
-  const handleRestoreByName = async () => {
-    const name = restoreName.trim();
-    if (name.length < 2) { toast.error("Skriv ditt kontonamn"); return; }
-    const pin = restorePin.trim();
-    if (pin && !/^\d{4}$/.test(pin)) { toast.error("PIN-koden måste vara 4 siffror"); return; }
-    setRestoring(true);
-    try {
-      const res = await api.restoreByName(name, pin);
-      if (!res.found) { toast.error("Hittade inget konto med det namnet"); return; }
-      toast.success(`Hämtade ${res.watches} bevakningar och ${res.keywords} sökbevakningar`);
-      setRestoreName("");
-      setRestorePin("");
-      setAccountName(name);
-      await load();
-      loadKwUnseen();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Kunde inte återställa - försök igen");
-    } finally {
-      setRestoring(false);
-    }
-  };
 
   const loadKwUnseen = useCallback(async () => {
     try {
@@ -289,50 +238,7 @@ function App() {
         </div>
 
         {/* Account name (password-less backup) – shown when you have watches */}
-        {auctions.length > 0 && (savedName && !showAccountPanel ? (
-          <div className="mb-5 flex items-center justify-between gap-2 rounded-xl border border-slate-800 bg-[#111827] px-4 py-3" data-testid="account-name-summary">
-            <p className="truncate text-sm text-slate-300">
-              Konto: <span className="font-semibold text-slate-100">{savedName}</span>
-              {hasPin && <span className="ml-1.5 text-emerald-400">🔒</span>}
-            </p>
-            <button onClick={() => setShowAccountPanel(true)} data-testid="account-name-edit" className="shrink-0 text-sm font-semibold text-amber-400 hover:text-amber-300">
-              Ändra
-            </button>
-          </div>
-        ) : (
-          <div className="mb-5 rounded-xl border border-slate-800 bg-[#111827] p-4" data-testid="account-name-panel">
-            <p className="text-sm font-semibold text-slate-200">Ditt kontonamn</p>
-            <p className="mt-1 text-xs text-slate-400">Välj ett namn och (valfritt) en 4-siffrig PIN så kan du återställa alla dina bevakningar på en ny enhet.</p>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <input
-                value={accountName}
-                onChange={(e) => setAccountName(e.target.value)}
-                placeholder="t.ex. janne-mopeder"
-                data-testid="account-name-input"
-                className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
-              />
-              <input
-                value={accountPin}
-                onChange={(e) => setAccountPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                inputMode="numeric"
-                maxLength={4}
-                placeholder={hasPin ? "PIN (satt)" : "PIN (valfri)"}
-                data-testid="account-pin-input"
-                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none sm:w-32"
-              />
-              <Button onClick={handleSaveName} disabled={savingName} data-testid="account-name-save" className="bg-slate-700 text-slate-100 hover:bg-slate-600">
-                {savingName ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-                Spara namn
-              </Button>
-            </div>
-            {hasPin && <p className="mt-1.5 text-[11px] text-emerald-400">🔒 Skyddat med PIN-kod</p>}
-            {savedName && (
-              <button onClick={() => { setShowAccountPanel(false); setAccountName(savedName); setAccountPin(""); }} data-testid="account-name-cancel" className="mt-2 text-xs text-slate-500 hover:text-slate-300">
-                Avbryt
-              </button>
-            )}
-          </div>
-        ))}
+        {auctions.length > 0 && <AccountNamePanel />}
 
         {/* Grid */}
         {loading ? (
@@ -349,31 +255,7 @@ function App() {
             <Button onClick={() => setAddOpen(true)} data-testid="empty-add-button" className="mt-5 bg-amber-500 text-slate-950 hover:bg-amber-600">
               <Plus className="mr-1.5 h-4 w-4" /> Bevaka första auktionen
             </Button>
-            <div className="mt-8 w-full max-w-sm border-t border-slate-800 pt-6">
-              <p className="text-sm text-slate-400">eller skriv ditt namn om du redan har bevakningar</p>
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                <input
-                  value={restoreName}
-                  onChange={(e) => setRestoreName(e.target.value)}
-                  placeholder="Ditt kontonamn"
-                  data-testid="restore-name-input"
-                  className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
-                />
-                <input
-                  value={restorePin}
-                  onChange={(e) => setRestorePin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                  inputMode="numeric"
-                  maxLength={4}
-                  placeholder="PIN (om satt)"
-                  data-testid="restore-pin-input"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none sm:w-32"
-                />
-                <Button onClick={handleRestoreByName} disabled={restoring} data-testid="restore-name-button" className="bg-amber-500 text-slate-950 hover:bg-amber-600">
-                  {restoring ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-                  Hämta
-                </Button>
-              </div>
-            </div>
+            <RestoreByNamePanel onRestored={() => { load(); loadKwUnseen(); }} />
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid="auctions-grid">

@@ -565,6 +565,23 @@ async def create_auction(payload: WatchCreate, request: Request, device_id: str 
     return auction
 
 
+async def _run_valuation(doc) -> dict:
+    """Shared AI valuation used by both analyze endpoints: ingest Auctionet real
+    sold prices, find comps, run the LLM. Raises HTTPException(502) on failure."""
+    try:
+        await _ingest_auctionet_sold(doc["title"])
+        comps = await _find_comps(doc["title"], doc["source"])
+        return await valuation.valuate(
+            doc["title"], doc.get("current_bid") or 0, doc["source"],
+            doc.get("total_now") or doc.get("current_bid") or 0, comps,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Valuation failed")
+        raise HTTPException(status_code=502, detail="AI-analysen misslyckades. Försök igen senare.")
+
+
 @api_router.post("/auctions/{auction_id}/analyze", response_model=Auction)
 async def analyze_auction(auction_id: str, request: Request, device_id: str = Depends(require_device)):
     _rate_limit(request, "analyze", 30, 60)
@@ -572,15 +589,7 @@ async def analyze_auction(auction_id: str, request: Request, device_id: str = De
     if not doc:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     doc = _clean(doc)
-    try:
-        await _ingest_auctionet_sold(doc["title"])
-        comps = await _find_comps(doc["title"], doc["source"])
-        val = await valuation.valuate(
-            doc["title"], doc["current_bid"], doc["source"], doc["total_now"], comps
-        )
-    except Exception:
-        logger.exception("Valuation failed")
-        raise HTTPException(status_code=502, detail="AI-analysen misslyckades. Försök igen senare.")
+    val = await _run_valuation(doc)
     now = datetime.now(timezone.utc).isoformat()
     await db.auctions.update_one(
         {"id": auction_id}, {"$set": {"valuation": val, "updated_at": now}}
@@ -597,15 +606,12 @@ async def refresh_auction(auction_id: str, request: Request, device_id: str = De
     if not doc:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     doc = _clean(doc)
-    if doc.get("url"):
-        data = await asyncio.to_thread(scraper.scrape_auction, doc["url"], None)
-        new_bid = max(doc["current_bid"], data["current_bid"])
-    else:
-        import random
-        new_bid = int(doc["current_bid"] * random.uniform(1.0, 1.08))
-    vat = doc.get("vat", 25)
-    buyer_fee = round(new_bid * 0.10)
-    total_now = round(new_bid * (1 + vat / 100) + buyer_fee)
+    if not doc.get("url"):
+        raise HTTPException(status_code=400, detail="Objektet saknar länk och kan inte uppdateras.")
+    data = await asyncio.to_thread(scraper.scrape_auction, doc["url"], None)
+    new_bid = max(doc["current_bid"], data["current_bid"])
+    f = crawler.compute_fees(doc["source"], new_bid, doc)
+    buyer_fee, total_now = f["buyer_fee"], f["total_now"]
     now = datetime.now(timezone.utc).isoformat()
     history = doc.get("bid_history", [])
     if new_bid > doc["current_bid"]:
@@ -614,14 +620,13 @@ async def refresh_auction(auction_id: str, request: Request, device_id: str = De
             "increment": new_bid - doc["current_bid"],
         }]
     bid_count = doc.get("bid_count", 0) + (1 if new_bid > doc["current_bid"] else 0)
-    await db.auctions.update_one({"id": auction_id}, {"$set": {
-        "current_bid": new_bid, "buyer_fee": buyer_fee, "total_now": total_now,
+    changes = {
+        "current_bid": new_bid, "buyer_fee": buyer_fee, "fee_known": f["fee_known"],
+        "fee_note": f["fee_note"], "vat": f["vat"], "total_now": total_now,
         "bid_count": bid_count, "bid_history": history, "updated_at": now,
-    }})
-    doc.update({
-        "current_bid": new_bid, "buyer_fee": buyer_fee, "total_now": total_now,
-        "bid_count": bid_count, "bid_history": history, "updated_at": now,
-    })
+    }
+    await db.auctions.update_one({"id": auction_id}, {"$set": changes})
+    doc.update(changes)
     return Auction(**doc)
 
 
@@ -799,16 +804,7 @@ async def live_analyze(payload: LiveAnalyzeReq, request: Request, device_id: str
                 return {"valuation": cached}
         except Exception:
             pass
-    try:
-        await _ingest_auctionet_sold(doc["title"])
-        comps = await _find_comps(doc["title"], doc["source"])
-        val = await valuation.valuate(
-            doc["title"], doc.get("current_bid") or 0, doc["source"],
-            doc.get("total_now") or doc.get("current_bid") or 0, comps
-        )
-    except Exception:
-        logger.exception("Live valuation failed")
-        raise HTTPException(status_code=502, detail="AI-analysen misslyckades. Försök igen senare.")
+    val = await _run_valuation(doc)
     await db.live_auctions.update_one(
         {"url": payload.url},
         {"$set": {"valuation": val, "valuation_at": datetime.now(timezone.utc).isoformat()}},
