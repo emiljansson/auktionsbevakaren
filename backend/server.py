@@ -5,10 +5,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import re
 import asyncio
+import hashlib
 import logging
 import time
 import uuid
 import bcrypt
+from pymongo.errors import DuplicateKeyError
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -1023,6 +1025,12 @@ async def startup():
         logger.exception("could not create unique watch index")
     await db.devices.create_index("device_id", unique=True)
     try:
+        await db.push_events.create_index("event_id", unique=True)
+        # Auto-expire old idempotency claims so the collection stays small.
+        await db.push_events.create_index("created_at", expireAfterSeconds=1209600)  # 14 days
+    except Exception:
+        logger.exception("could not create push_events indexes")
+    try:
         await db.sold_items.create_index("url", unique=True)
         await db.sold_items.create_index([("title", "text")])
     except Exception:
@@ -1189,6 +1197,20 @@ async def _dedupe_device_tokens():
         logger.exception("dedupe_device_tokens")
 
 
+async def _claim_push(event_id: str) -> bool:
+    """Idempotency gate: atomically claim a push event so the SAME logical
+    notification is sent at most once, even across notifier races, a double-
+    started loop, or multiple backend instances sharing this MongoDB. Returns
+    True only to the single caller that wins the claim. (CommHub has no native
+    tag/collapse/idempotency, so this is enforced server-side.)"""
+    try:
+        await db.push_events.insert_one(
+            {"event_id": event_id, "created_at": datetime.now(timezone.utc)})
+        return True
+    except DuplicateKeyError:
+        return False
+
+
 async def _watch_notifier():
     """Per-device push for watched items: (1) when a new (higher) bid is placed,
     and (2) multi-step ending alerts at <60 min, <10 min and the last minute.
@@ -1222,12 +1244,15 @@ async def _watch_notifier():
                     if last is None:
                         last = a.get("current_bid") or 0
                     if cur and cur > last:
-                        try:
-                            await commhub.send_to_token(
-                                token, title="💰 Nytt bud",
-                                body=f"{title}: nytt bud {_fmt_sek(cur)} kr", data=data)
-                        except Exception:
-                            logger.exception("new-bid push failed")
+                        # Idempotent per (token,url,bid): the same device never
+                        # gets the same bid twice, even if this write races.
+                        if await _claim_push(f"bid|{token}|{a.get('url')}|{cur}"):
+                            try:
+                                await commhub.send_to_token(
+                                    token, title="💰 Nytt bud",
+                                    body=f"{title}: nytt bud {_fmt_sek(cur)} kr", data=data)
+                            except Exception:
+                                logger.exception("new-bid push failed")
                         changes["notified_bid"] = cur
 
                     # (2) Multi-step ending alert (prefer the live end time)
@@ -1244,12 +1269,13 @@ async def _watch_notifier():
                             step = None
                         sent = set(a.get("notified_steps", []))
                         if step and step not in sent:
-                            try:
-                                await commhub.send_to_token(
-                                    token, title="⏰ Auktion snart slut",
-                                    body=f"{title} {label}", data=data)
-                            except Exception:
-                                logger.exception("ending push failed")
+                            if await _claim_push(f"end|{token}|{a.get('url')}|{step}"):
+                                try:
+                                    await commhub.send_to_token(
+                                        token, title="⏰ Auktion snart slut",
+                                        body=f"{title} {label}", data=data)
+                                except Exception:
+                                    logger.exception("ending push failed")
                             for s in order[: order.index(step) + 1]:
                                 sent.add(s)
                             changes["notified_steps"] = list(sent)
@@ -1289,12 +1315,14 @@ async def _run_keyword_check(w, now):
         if token and commhub.enabled():
             n = len(new)
             body = f"{n} ny{'a' if n != 1 else ''} produkt{'er' if n != 1 else ''} i auktionssystemen"
-            try:
-                await commhub.send_to_token(
-                    token, title=f"🔎 Nya träffar för '{w['keyword']}'", body=body,
-                    data={"type": "keyword_watch", "keyword_watch_id": w["id"]})
-            except Exception:
-                logger.exception("keyword push failed")
+            sig = hashlib.sha1("|".join(sorted(new)).encode()).hexdigest()[:16]
+            if await _claim_push(f"kw|{token}|{w['id']}|{sig}"):
+                try:
+                    await commhub.send_to_token(
+                        token, title=f"🔎 Nya träffar för '{w['keyword']}'", body=body,
+                        data={"type": "keyword_watch", "keyword_watch_id": w["id"]})
+                except Exception:
+                    logger.exception("keyword push failed")
     await db.keyword_watches.update_one({"id": w["id"]}, {"$set": update})
 
 

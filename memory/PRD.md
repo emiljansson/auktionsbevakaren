@@ -361,3 +361,14 @@ Användare upplevde att "nya okända objekt dyker upp hela tiden" vid skroll. Or
 - Orsak 1: `GET /api/live/auctions` kapade `.to_list(5000)` → bara de 5000 snarast-slutande hämtades, resten föll bort. Höjt till 30000 (täcker alla ~9800 bakgrundsobjekt; svarstid ~0,26s).
 - Orsak 2: statusradens `live_count` räknade HELA collection (12392, inkl. on-demand Tradera/Blocket/Auctionet + avslutade) medan flödet exkluderar on-demand → användaren jämförde 12382 mot 4987. `GET /api/live/status` räknar nu bara bakgrundskällor (`$nin` on-demand) så siffran matchar flödets total.
 - Resultat: statusrad = flödets total = ~9767 objekt (98 sidor). On-demand-källor (Tradera/Blocket/Auctionet, ~2570) visas fortfarande bara vid sökning. Verifierat via API + UI.
+
+## 2026-10-06 — FIX (3:e återkomsten): Dubbelpush på nya bud — atomär idempotens
+- Diagnos: det bevakade objektet (fabeo TSV 1188) hade bara EN bevakningsrad i preview-DB:n och den devicen saknar token sedan igår → preview kunde inte ha skickat pushen för 30 min sedan. notified_bid satt kvar på 750 trots push för 1750 ⇒ den skickande processen skrev INTE till denna DB-rad. Slutsats: dubbletten kommer från en annan instans (den nyss deployade produktionen med egen DB / äldre deployad kod) och/eller samma telefon registrerad under flera FCM-tokens. Den gamla läs→jämför→skicka→skriv-logiken (notified_bid som high-water mark) är inte atomär och `seen`-mängden dedupar bara inom ETT pass.
+- Integration (CommHub, via integration_expert): CommHub `/api/push/send` stöder INTE `tag`/`collapse_key`/webpush/data-only → klient-dedup går ej. Rekommenderad lösning: server-side idempotens via unik `event_id`-claim i MongoDB + token-livscykel.
+- Fix (server.py):
+  - Ny collection `push_events` med unikt index på `event_id` + TTL `created_at` 14 dagar (auto-städning).
+  - Hjälpare `_claim_push(event_id)`: atomär `insert_one`; endast EN anropare vinner (DuplicateKeyError → False). Skickar push bara om claim vinner.
+  - Bud: `event_id = bid|{token}|{url}|{cur}` → samma telefon-token får aldrig samma bud två gånger, oavsett races/dubbla loopar/flera instanser som delar DB. notified_bid behålls fortf. som baslinje.
+  - Sluttid: `event_id = end|{token}|{url}|{step}`. Sökbevakning: `kw|{token}|{watch_id}|{sha1(nya urls)}`.
+- Verifierat: 3 samtidiga claims → exakt 1 True; nytt bud-claim → True; index+TTL bekräftade. OBS: äkta push-verifiering kräver redeploy + verkligt bud (kan ej simuleras mot FCM härifrån).
+- Kvarstående gräns: om PRODUKTION kör egen separat MongoDB OCH telefonen är registrerad under flera tokens där, kan äkta cross-DB-dubbletter inte slås ihop (CommHub saknar tag). Redeploy av denna kod gör dock varje instans internt dubblettsäker; trolig verklig orsak var att produktionen körde ÄLDRE kod utan dedup-fixarna.
