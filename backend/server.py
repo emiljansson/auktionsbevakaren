@@ -447,6 +447,7 @@ async def restore_by_name(payload: AccountNameReq, request: Request, device_id: 
         if a.get("url") in existing:
             continue
         a.pop("_id", None)
+        a["id"] = str(uuid.uuid4())
         a["device_id"] = device_id
         await db.auctions.insert_one(a)
         existing.add(a.get("url"))
@@ -526,8 +527,11 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
                 d[k] = lv[k]
         d["bid_count"] = _real_bid_count(lv)
         d["bid_history"] = _bid_history(lv)
-    # Soonest-ending first; items without an end time go last.
-    docs.sort(key=lambda d: d.get("ends_at") or "9999")
+    # Soonest-ending first; items without an end time go last. Parse to real
+    # datetimes so mixed ISO formats (Z vs +02:00) sort chronologically, not as
+    # raw strings.
+    far = datetime.max.replace(tzinfo=timezone.utc)
+    docs.sort(key=lambda d: _parse_iso(d.get("ends_at")) or far)
     return [Auction(**_clean(d)) for d in docs]
 
 
@@ -1009,7 +1013,7 @@ async def _watch_notifier():
                             changes["notified_steps"] = list(sent)
 
                     if changes:
-                        await db.auctions.update_one({"id": a["id"]}, {"$set": changes})
+                        await db.auctions.update_one({"_id": a["_id"]}, {"$set": changes})
         except Exception:
             logger.exception("watch notifier loop")
         await asyncio.sleep(60)
