@@ -1,6 +1,6 @@
 {
-  "name": "Auktionsbevakning.se",
-  "short_name": "Auktioner",
+  "name": "Auktiomera.se",
+  "short_name": "Auktiomera",
   "description": "Bevaka svenska auktioner och få push när de snart avslutas.",
   "start_url": "/",
   "scope": "/",

@@ -217,7 +217,7 @@ function App() {
               <Gavel className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate font-heading text-base font-extrabold leading-none tracking-tight sm:text-lg">Auktionsbevakning<span className="text-amber-400">.se</span></h1>
+              <h1 className="truncate font-heading text-base font-extrabold leading-none tracking-tight sm:text-lg">Auktiomera<span className="text-amber-400">.se</span></h1>
               <p className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />

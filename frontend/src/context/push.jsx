@@ -19,7 +19,7 @@ export const PushProvider = ({ children }) => {
   useEffect(() => {
     initMessaging((payload) => {
       const n = payload?.notification || payload?.data || {};
-      if (n.title || n.body) toast(n.title || "Auktionsbevakning", { description: n.body });
+      if (n.title || n.body) toast(n.title || "Auktiomera", { description: n.body });
     });
     const onPrompt = (e) => { e.preventDefault(); setDeferred(e); };
     window.addEventListener("beforeinstallprompt", onPrompt);

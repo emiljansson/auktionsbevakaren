@@ -31,7 +31,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 crawler = Crawler(db)
 
-app = FastAPI(title="Auktionsbevakning API")
+app = FastAPI(title="Auktiomera API")
 api_router = APIRouter(prefix="/api")
 
 logger = logging.getLogger("auktion")
@@ -472,7 +472,7 @@ async def restore_by_name(payload: AccountNameReq, request: Request, device_id: 
 # ---------- Routes ----------
 @api_router.get("/")
 async def root():
-    return {"message": "Auktionsbevakning API", "sources": SOURCE_LIST}
+    return {"message": "Auktiomera API", "sources": SOURCE_LIST}
 
 
 @api_router.get("/sources")
