@@ -242,13 +242,11 @@ class Crawler:
             # Preserve the final end time + price on any watched copies so the
             # watchlist keeps showing "Avslutad" + end time after the live doc
             # is purged (and so the 24h watch-cleanup below can act on it).
-            await self.db.auctions.update_many(
-                {"url": d["url"]},
-                {"$set": {"ends_at": d.get("ends_at"),
-                          "current_bid": d.get("current_bid"),
-                          "total_now": d.get("total_now"),
-                          "bid_count": d.get("bid_count")}},
-            )
+            stamp = {k: d.get(k) for k in
+                     ("ends_at", "current_bid", "total_now", "bid_count")
+                     if d.get(k) is not None}
+            if stamp:
+                await self.db.auctions.update_many({"url": d["url"]}, {"$set": stamp})
             if (d.get("current_bid") or 0) > 0:
                 await self._archive_sold(d, do_fetch=(fetched < 40))
                 fetched += 1

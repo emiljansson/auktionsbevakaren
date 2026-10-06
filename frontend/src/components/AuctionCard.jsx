@@ -64,7 +64,7 @@ export const AuctionCard = ({ auction, onOpen, onDelete }) => {
         <div className="flex items-end justify-between">
           <div>
             <p className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
-              {auction.fixed_price ? "Fastpris · Köp nu" : auction.current_bid > 0 ? "Nuvarande bud" : "Utropspris · inga bud"}
+              {auction.fixed_price ? "Fastpris · Köp nu" : tl?.ended && auction.current_bid > 0 ? "Slutpris" : auction.current_bid > 0 ? "Nuvarande bud" : "Utropspris · inga bud"}
             </p>
             <p className="font-heading text-2xl font-bold text-amber-400">
               {formatSEK(auction.current_bid > 0 ? auction.current_bid : (auction.starting_price || auction.current_bid))}

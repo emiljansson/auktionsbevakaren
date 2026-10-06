@@ -58,7 +58,7 @@ export const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
           </>
         ) : a.current_bid > 0 ? (
           <>
-            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Aktuellt bud{a.bid_count ? ` · ${a.bid_count} bud` : ""}</p>
+            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">{tl?.ended ? "Slutpris" : "Aktuellt bud"}{a.bid_count ? ` · ${a.bid_count} bud` : ""}</p>
             <p className="font-heading text-lg font-bold text-amber-400">{formatSEK(a.current_bid)}</p>
           </>
         ) : a.starting_price ? (

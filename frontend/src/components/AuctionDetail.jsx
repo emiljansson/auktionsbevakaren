@@ -89,7 +89,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
             <img src={auction.image} alt={auction.title} className="h-48 w-full rounded-xl object-cover sm:h-full" />
           </div>
           <div className="sm:col-span-3 grid grid-cols-2 gap-3">
-            <Metric label="Nuvarande bud" value={formatSEK(auction.current_bid)} accent="text-amber-400" />
+            <Metric label={tl?.ended && auction.current_bid > 0 ? "Slutpris" : "Nuvarande bud"} value={formatSEK(auction.current_bid)} accent="text-amber-400" />
             <Metric label="Antal bud" value={`${auction.bid_count} st`} />
             {soldSummary?.count > 0 && (
               <div className="col-span-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3" data-testid="sold-median-inline">

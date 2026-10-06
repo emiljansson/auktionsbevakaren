@@ -568,6 +568,10 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
             return (2, 0.0)
         return (0, e.timestamp()) if e >= now_ts else (1, -e.timestamp())
     docs.sort(key=_order)
+    for d in docs:  # defensive: never let a stray None int 500 the whole list
+        for k in ("current_bid", "bid_count", "total_now"):
+            if d.get(k) is None:
+                d[k] = 0
     return [Auction(**_clean(d)) for d in docs]
 
 
