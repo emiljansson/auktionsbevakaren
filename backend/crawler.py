@@ -39,9 +39,9 @@ FEE_CONFIG = {
     "Klaravik":    {"vat": 25, "note": "Moms 25% + inropsavgift tillkommer (visas vid bud)"},
     "Blinto":      {"vat": 25, "note": "Moms 25% + slagavgift tillkommer (se auktionssidan)"},
     "Fabeo":       {"vat": 25, "note": "Moms 25% + slagavgift tillkommer (se auktionssidan)"},
-    "Netauktion":  {"vat": 25, "note": "Moms 25% + slagavgift tillkommer (se auktionssidan)"},
-    "Retrade":     {"vat": 25, "note": "Moms 25% + auktionsavgift + 250 kr/faktura tillkommer"},
-    "Tovek":       {"vat": 25, "note": "Moms 25% + fast slagavgift tillkommer (se auktionssidan)"},
+    "Netauktion":  {"vat": 25, "note": "Moms 25% + slagavgift tillkommer (se auktionssidan) + ev. expeditionsavgift tillkommer"},
+    "Retrade":     {"vat": 25, "exp_fee": 250, "note": "Moms 25% + auktionsavgift tillkommer (visas vid bud)"},
+    "Tovek":       {"vat": 25, "exp_fee": 30, "note": "Moms 25% + fast slagavgift tillkommer (se auktionssidan)"},
     "Tradera":     {"vat": 0,  "fee_pct": 0, "fee_min": 0, "note": "Privatköp – pris som visat (ingen slagavgift)"},
     "Riksauktioner": {"vat": 25, "fee_pct": 12, "fee_min": 120, "fee_max": 25000,
                       "note": "Moms 25% + klubbavgift 12% (min 120 kr, max 25 000 kr) inkl. moms"},
@@ -52,6 +52,12 @@ FEE_CONFIG = {
 
 def _fmt_kr(n):
     return f"{int(round(n)):,}".replace(",", " ")
+
+
+def exp_fee_incl(source):
+    """Fixed expeditions-/faktureringsavgift INCL 25% VAT for a source (0 if none)."""
+    exc = FEE_CONFIG.get(source, {}).get("exp_fee")
+    return round(exc * 1.25) if exc else 0
 
 
 def compute_fees(source, bid, it):
@@ -97,9 +103,19 @@ def compute_fees(source, bid, it):
             note = cfg.get("note")
     else:
         buyer_fee, buyer_fee_excl, fee_known, note = None, None, False, cfg.get("note")
-    total_now = bid_incl + (buyer_fee or 0)
+
+    # Fixed expeditions-/faktureringsavgift per object (e.g. Tovek 30 kr,
+    # Retrade 250 kr). Always +25% VAT, added on top of bid + slagavgift.
+    exp_excl = cfg.get("exp_fee")
+    exp_incl = round(exp_excl * 1.25) if exp_excl else 0
+    if exp_excl and exp_incl:
+        exp_txt = f"expeditionsavgift {_fmt_kr(exp_excl)} kr + 25% moms"
+        note = f"{note} + {exp_txt}" if note else exp_txt[0].upper() + exp_txt[1:]
+
+    total_now = bid_incl + (buyer_fee or 0) + exp_incl
     return {"vat": vat, "vat_amount": vat_amount, "bid_incl": bid_incl,
             "buyer_fee": buyer_fee, "buyer_fee_excl": buyer_fee_excl,
+            "exp_fee": exp_incl or None, "exp_fee_excl": exp_excl or None,
             "fee_known": fee_known, "fee_approx": False,
             "total_now": total_now, "fee_note": note}
 
@@ -310,6 +326,7 @@ class Crawler:
                 "image": doc.get("image"), "final_bid": final_bid,
                 "total_final": total_final, "bid_count": doc.get("bid_count"),
                 "ends_at": doc.get("ends_at"), "sold_at": _iso(),
+                "exp_included": True,
             }},
             upsert=True,
         )

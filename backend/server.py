@@ -19,12 +19,13 @@ load_dotenv(ROOT_DIR / '.env')
 
 import scraper
 import valuation
+import adapters
 import tradera
 import blocket
 import auctionet
 import commhub
 from fastapi import Header
-from crawler import Crawler, compute_fees
+from crawler import Crawler, compute_fees, exp_fee_incl
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -998,6 +999,8 @@ async def startup():
     crawler.start()
     asyncio.create_task(_dedupe_device_tokens())
     asyncio.create_task(_backfill_watch_ends_at())
+    asyncio.create_task(_backfill_sold_exp())
+    asyncio.create_task(_watch_auto_refresh())
     asyncio.create_task(_watch_notifier())
     try:
         await db.keyword_watches.create_index("device_id")
@@ -1005,6 +1008,103 @@ async def startup():
     except Exception:
         logger.exception("could not create keyword_watches index")
     asyncio.create_task(_keyword_watch_loop())
+
+
+async def _fetch_item_refresh(source, url):
+    """Per-item live refresh via the right source adapter (PS Auction needs the
+    ScrapingBee item fetch; others use their site adapter)."""
+    if source == "PS Auction":
+        import ps_playwright
+        return await ps_playwright.refresh_item(url)
+    ad = adapters.adapter_for_source(source)
+    if ad:
+        return await ad.refresh_item(url)
+    return None
+
+
+async def _watch_auto_refresh():
+    """Every 30 min, refresh each distinct watched item's live price directly
+    (per-item), so watchlists stay current regardless of the background crawl
+    cadence — important for PS Auction whose full catalog pass runs only ~every
+    72h. Only touches items users actually watch; ended items are skipped."""
+    await asyncio.sleep(45)
+    while True:
+        try:
+            urls = await db.auctions.distinct("url", {"url": {"$nin": [None, ""]}})
+            now = datetime.now(timezone.utc)
+            for url in urls:
+                try:
+                    s = await db.auctions.find_one(
+                        {"url": url},
+                        {"source": 1, "current_bid": 1, "ends_at": 1,
+                         "starting_price": 1, "vat": 1, "buyer_fee_excl": 1})
+                    if not s:
+                        continue
+                    end = _parse_iso(s.get("ends_at"))
+                    if end and end < now:
+                        continue  # ended — nothing to refresh
+                    res = await _fetch_item_refresh(s.get("source"), url)
+                    if not res or not res.get("current_bid"):
+                        continue
+                    new_bid = res["current_bid"]
+                    # Build the fee context from the live doc's learned inputs so
+                    # exact per-object fees (e.g. Tovek slagavgift) survive.
+                    lv = await db.live_auctions.find_one(
+                        {"url": url},
+                        {"fee_inputs": 1, "starting_price": 1, "vat": 1})
+                    ctx = dict((lv or {}).get("fee_inputs") or {})
+                    ctx.setdefault("fee_excl", s.get("buyer_fee_excl"))
+                    ctx["starting_price"] = (lv or {}).get("starting_price") or s.get("starting_price")
+                    if (lv or {}).get("vat") is not None:
+                        ctx["vat"] = lv["vat"]
+                    for k in ("fee_excl", "fee_vat", "vat"):
+                        if res.get(k) is not None:
+                            ctx[k] = res[k]
+                    f = compute_fees(s.get("source"), new_bid, ctx)
+                    changes = {
+                        "current_bid": new_bid, "buyer_fee": f["buyer_fee"],
+                        "buyer_fee_excl": f["buyer_fee_excl"], "fee_known": f["fee_known"],
+                        "fee_note": f["fee_note"], "vat": f["vat"],
+                        "total_now": f["total_now"], "updated_at": now.isoformat(),
+                    }
+                    if res.get("bid_count") is not None:
+                        changes["bid_count"] = res["bid_count"]
+                    if res.get("ends_at"):
+                        changes["ends_at"] = res["ends_at"]
+                    await db.auctions.update_many({"url": url}, {"$set": changes})
+                    await db.live_auctions.update_one({"url": url}, {"$set": changes})
+                    await asyncio.sleep(2)  # be gentle on proxies
+                except Exception:
+                    logger.exception("auto-refresh failed for %s", url)
+        except Exception:
+            logger.exception("watch_auto_refresh loop")
+        await asyncio.sleep(1800)  # every 30 min
+
+
+async def _backfill_sold_exp():
+    """Self-heal (runs at startup, idempotent): add the fixed expeditions-/
+    faktureringsavgift (incl VAT) to archived sold-item totals for sources that
+    charge one (Tovek, Retrade) when it wasn't included yet. Guarded by the
+    `exp_included` flag so it never double-adds; new archives set the flag."""
+    await asyncio.sleep(14)
+    try:
+        updated = 0
+        for source in ("Tovek", "Retrade"):
+            inc = exp_fee_incl(source)
+            if not inc:
+                continue
+            async for sd in db.sold_items.find(
+                    {"source": source, "exp_included": {"$ne": True},
+                     "total_final": {"$ne": None}}, {"total_final": 1}):
+                await db.sold_items.update_one(
+                    {"_id": sd["_id"]},
+                    {"$set": {"total_final": (sd["total_final"] or 0) + inc,
+                              "exp_included": True}})
+                updated += 1
+        if updated:
+            logger.info("backfill_sold_exp: added expeditionsavgift to %d sold items", updated)
+    except Exception:
+        logger.exception("backfill_sold_exp")
 
 
 async def _backfill_watch_ends_at():

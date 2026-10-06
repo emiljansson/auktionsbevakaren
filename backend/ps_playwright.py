@@ -239,3 +239,37 @@ async def collect():
         _last_full = _last_soon = now
     await _save_state()
     return results[:MAX_ITEMS]
+
+
+
+async def refresh_item(url):
+    """Fetch a single PS Auction item page via ScrapingBee and parse its live
+    bid / bid count / end time. Returns a dict (current_bid, bid_count, ends_at)
+    or None if the item can't be read or has ended. Used for on-demand refresh
+    of watched items between the heavy time-gated discovery passes."""
+    html = None
+    for attempt in range(2):  # ScrapingBee 500s are often transient
+        try:
+            html = await _bee(url)
+            break
+        except Exception as e:
+            logger.warning("PS refresh_item failed %s (try %s): %s", url, attempt + 1, e)
+            await asyncio.sleep(3)
+    if not html:
+        return None
+    txt = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
+    # The leading bid is clearly labelled "Ledande bud <amount> SEK" (fall back
+    # to "Högsta bud <amount>"). Anchor on the label so we never grab an
+    # adjacent item's figure.
+    bm = (re.search(r"Ledande bud\s*([\d\s\u00a0]+?)\s*SEK", txt)
+          or re.search(r"Högsta bud\s*([\d\s\u00a0]+?)\s", txt))
+    if not bm:
+        return None
+    bid = int(bm.group(1).replace("\u00a0", "").replace(" ", ""))
+    if bid <= 0:
+        return None
+    res = {"current_bid": bid}
+    cm = re.search(r"(\d+)\s*bud\b", txt)
+    if cm:
+        res["bid_count"] = int(cm.group(1))
+    return res
