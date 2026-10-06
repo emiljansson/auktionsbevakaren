@@ -62,6 +62,7 @@ class Auction(BaseModel):
     currency: str = "SEK"
     vat: int = 25
     buyer_fee: Optional[int] = 0
+    buyer_fee_excl: Optional[int] = None
     fee_known: bool = True
     fee_note: Optional[str] = None
     total_now: int
@@ -531,7 +532,8 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
         if not lv:
             continue
         for k in ("current_bid", "starting_price", "vat", "buyer_fee",
-                  "fee_known", "fee_note", "total_now", "ends_at", "bid_count"):
+                  "buyer_fee_excl", "fee_known", "fee_note", "total_now",
+                  "ends_at", "bid_count"):
             if lv.get(k) is not None:
                 d[k] = lv[k]
         d["bid_count"] = _real_bid_count(lv)
@@ -634,7 +636,8 @@ async def refresh_auction(auction_id: str, request: Request, device_id: str = De
         }]
     bid_count = doc.get("bid_count", 0) + (1 if new_bid > doc["current_bid"] else 0)
     changes = {
-        "current_bid": new_bid, "buyer_fee": buyer_fee, "fee_known": f["fee_known"],
+        "current_bid": new_bid, "buyer_fee": buyer_fee,
+        "buyer_fee_excl": f["buyer_fee_excl"], "fee_known": f["fee_known"],
         "fee_note": f["fee_note"], "vat": f["vat"], "total_now": total_now,
         "bid_count": bid_count, "bid_history": history, "updated_at": now,
     }
@@ -804,6 +807,7 @@ async def watch_live(payload: WatchCreate, device_id: str = Depends(require_devi
         starting_price=doc.get("starting_price"),
         bid_count=_real_bid_count(doc),
         vat=doc.get("vat", 25), buyer_fee=doc.get("buyer_fee"),
+        buyer_fee_excl=doc.get("buyer_fee_excl"),
         fee_known=doc.get("fee_known", True), fee_note=doc.get("fee_note"),
         total_now=doc.get("total_now", doc["current_bid"]),
         url=doc["url"], scraped=True, bid_history=history,

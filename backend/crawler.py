@@ -71,7 +71,7 @@ def compute_fees(source, bid, it):
         buyer_fee = round(bid * cfg.get("fee_pct", 0) / 100) + cfg.get("fee_add", 0) if bid else 0
         total_now = bid_incl + buyer_fee
         return {"vat": vat, "vat_amount": vat_amount, "bid_incl": bid_incl,
-                "buyer_fee": buyer_fee or None, "fee_known": False,
+                "buyer_fee": buyer_fee or None, "buyer_fee_excl": None, "fee_known": False,
                 "fee_approx": bool(buyer_fee), "total_now": total_now,
                 "fee_note": cfg.get("note")}
 
@@ -89,16 +89,18 @@ def compute_fees(source, bid, it):
 
     if fee_excl is not None:
         buyer_fee, fee_known = round(fee_excl * (1 + fee_vat / 100)), True
+        buyer_fee_excl = round(fee_excl)
         if buyer_fee > 0:
-            note = (f"Moms {vat}% på bud + slagavgift {_fmt_kr(buyer_fee)} kr (inkl. moms)"
-                    if vat else f"Slagavgift {_fmt_kr(buyer_fee)} kr (inkl. moms)")
+            note = (f"Moms {vat}% på bud + slagavgift {_fmt_kr(buyer_fee_excl)} kr + {fee_vat}% moms"
+                    if vat else f"Slagavgift {_fmt_kr(buyer_fee_excl)} kr + {fee_vat}% moms")
         else:
             note = cfg.get("note")
     else:
-        buyer_fee, fee_known, note = None, False, cfg.get("note")
+        buyer_fee, buyer_fee_excl, fee_known, note = None, None, False, cfg.get("note")
     total_now = bid_incl + (buyer_fee or 0)
     return {"vat": vat, "vat_amount": vat_amount, "bid_incl": bid_incl,
-            "buyer_fee": buyer_fee, "fee_known": fee_known, "fee_approx": False,
+            "buyer_fee": buyer_fee, "buyer_fee_excl": buyer_fee_excl,
+            "fee_known": fee_known, "fee_approx": False,
             "total_now": total_now, "fee_note": note}
 
 
@@ -352,6 +354,7 @@ class Crawler:
                 update["vat_amount"] = f["vat_amount"]
                 update["bid_incl"] = f["bid_incl"]
                 update["buyer_fee"] = f["buyer_fee"]
+                update["buyer_fee_excl"] = f["buyer_fee_excl"]
                 update["fee_known"] = f["fee_known"]
                 update["fee_approx"] = f.get("fee_approx", False)
                 update["fee_note"] = f["fee_note"]
@@ -374,6 +377,7 @@ class Crawler:
                 "current_bid": bid, "currency": "SEK", "vat": f["vat"],
                 "vat_amount": f["vat_amount"], "bid_incl": f["bid_incl"],
                 "buyer_fee": f["buyer_fee"], "fee_known": f["fee_known"],
+                "buyer_fee_excl": f["buyer_fee_excl"],
                 "fee_approx": f.get("fee_approx", False),
                 "fee_note": f["fee_note"], "total_now": f["total_now"], "url": it["url"],
                 "fee_inputs": fee_inputs,
@@ -415,6 +419,7 @@ class Crawler:
                 update["vat_amount"] = f["vat_amount"]
                 update["bid_incl"] = f["bid_incl"]
                 update["buyer_fee"] = f["buyer_fee"]
+                update["buyer_fee_excl"] = f["buyer_fee_excl"]
                 update["fee_known"] = f["fee_known"]
                 update["fee_approx"] = f.get("fee_approx", False)
                 update["fee_note"] = f["fee_note"]

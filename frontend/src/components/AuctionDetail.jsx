@@ -101,7 +101,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
               </div>
             )}
             <Metric label={`Totalpris ${vatIncl ? "inkl." : "exkl."} moms`} value={formatSEK(bidPriceDisplay)} />
-            <Metric label="Slagavgift" value={auction.fee_known ? formatSEK(auction.buyer_fee) : "Tillkommer"} />
+            <Metric label="Slagavgift (exkl. moms)" value={auction.fee_known ? formatSEK(auction.buyer_fee_excl ?? Math.round((auction.buyer_fee || 0) / 1.25)) : "Tillkommer"} />
             <div className="col-span-2 rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">Moms {auction.vat}% · Visa totalpris</span>
