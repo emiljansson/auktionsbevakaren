@@ -271,3 +271,9 @@ Lade till valfritt PIN-skydd på det lösenordslösa kontonamnet (via integratio
 - Frontend (App.js): PIN-fält (4 siffror, numeriskt) i "Ditt kontonamn"-panelen (+ "🔒 Skyddat med PIN-kod"-indikator) och i tomt-läge-återställningen. api.setAccountName/restoreByName tar nu (name, pin). Visar serverns felmeddelande vid fel PIN.
 - Verifierat (curl, preview): sätt namn+PIN 1234 -> restore utan PIN=403, fel PIN=403, rätt PIN=17 bevakningar+6 sökbevakningar. Frontend kompilerar utan fel.
 - Not: 4-siffrig PIN har låg entropi (accepterat av produktägaren); skyddar vid vila (bcrypt) + rate limiting. Kräver ompublicering för live. bcrypt==4.1.3 redan i requirements.
+
+## Refaktorering + fixar (2026-06)
+1. **Avgiftsbugg i refresh_auction** (server.py): använde hårdkodad 10% slagavgift + förenklad moms och hade en MOCKAD `random`-budökning för objekt utan URL. Nu: `compute_fees(source, new_bid, doc)` (korrekt per-sajt-avgift), och HTTP 400 om URL saknas (mock borttagen). Följdbugg (fångad av testagent): `crawler` är en Crawler-INSTANS; `compute_fees` är modulnivå -> ändrade importen till `from crawler import Crawler, compute_fees`. Verifierat: Klaravik-bud 497 500 -> total 621 875 (=×1.25), fee_known=false.
+2. **Delad värderingshjälpare** `_run_valuation(doc)` (server.py) används av både `/auctions/{id}/analyze` och `/live/analyze` (tog bort ~20 dubblerade rader; felhanteringen kan inte längre glida isär).
+3. **App.js uppdelad**: bröt ut AccountNamePanel + RestoreByNamePanel till `/app/frontend/src/components/AccountTools.jsx` (komponenterna äger sitt eget state). Tog bort 9 useState-hooks + 2 handlers + 1 useEffect ur App.js.
+- Testagent (iteration_12): 7/8 backend-pytest pass + frontend pass (rename 'Auktiomera.se', 3 flikar, tomt-läge-restore-panel). Enda kritiska (crawler.compute_fees 500) nu fixad och verifierad.

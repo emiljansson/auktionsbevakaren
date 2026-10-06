@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 12 verified the refactor + account PIN work. Backend: 7/8 pytest cases pass (test_account_and_refresh.py). All account/name + 4-digit PIN flows (A/B/C) + validation + /api/live/analyze shared helper + watched /analyze + refresh-missing-url=400 pass. ONE CRITICAL BUG: POST /api/auctions/{id}/refresh crashes with HTTP 500 because server.py line 613 calls `crawler.compute_fees(...)` but `crawler` is a `Crawler` instance (server.py line 32: `crawler = Crawler(db)`) and `compute_fees` is a MODULE-level function in crawler.py (line 57), not a method on the class. AttributeError confirmed in backend logs. Frontend: app rename to 'Auktiomera.se' is live in both <title> and <h1>; all three tabs (view-live/view-search/view-watch) switch without JS errors; live feed shows auction cards; empty-state restore panel on 'Mina bevakningar' renders data-testid='restore-name-input', 'restore-pin-input' and 'restore-name-button', typing a non-existent name + clicking Hämta triggered the API and the Swedish 'Hittade inget konto med det namnet' toast appeared.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/auctions/{id}/refresh", "issue": "AttributeError: 'Crawler' object has no attribute 'compute_fees' -> HTTP 500. The call `crawler.compute_fees(doc['source'], new_bid, doc)` at server.py:613 should be `compute_fees(...)` (module-level, already used elsewhere, e.g. crawler.py:273, 340, 412) OR imported as `from crawler import compute_fees`. Trivial one-line fix.", "priority": "CRITICAL"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_account_and_refresh.py",
+    "/app/test_reports/pytest/account_and_refresh.xml"
+  ],
+  "action_items": [
+    "Fix refresh_auction in /app/backend/server.py line 613: replace `crawler.compute_fees(...)` with the module-level `compute_fees(...)` (add `from crawler import compute_fees` at the top of server.py or use `crawler_module.compute_fees` after renaming the import). Confirmed by backend traceback: AttributeError: 'Crawler' object has no attribute 'compute_fees'."
+  ],
+  "critical_code_review_comments": [
+    "server.py:27 imports `from crawler import Crawler` only; the module-level helper `compute_fees` is never imported, so any `crawler.compute_fees(...)` call on the Crawler instance will AttributeError. Add explicit import.",
+    "The refactor removed the mocked random-bid fallback (good) but did not add an integration test around compute_fees, which would have caught this instance-vs-module typo immediately.",
+    "Account/restore flows are solid: PIN hashing is bcrypt (async wrappers), 403 on wrong/missing PIN, 400 on <2-char name and non-4-digit PIN, name_lower index-friendly lookup — all behave per spec.",
+    "_run_valuation shared helper correctly raises HTTPException(502) on failures and preserves the LLM path for both /api/live/analyze and /api/auctions/{id}/analyze."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_account_and_refresh.py"
+  ],
+  "success_rate": {"backend": "87.5% (7/8)", "frontend": "100%"},
+  "test_credentials": "No login; per-test fresh X-Device-Id values.",
+  "seed_data_creation": "Created transient accounts qa-noPin-* and qa-pin-* (with pin 1234) across devA..devE, plus a single watched Blinto item under qa-watch-* (auto-deleted). Validation test leaves no residue. Accounts remain in 'accounts' collection; names are prefixed and random so they don't collide.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After the one-line fix to refresh_auction, rerun pytest backend/tests/test_account_and_refresh.py::TestRefreshAndAnalyze::test_refresh_uses_compute_fees -n 0. All other tests already pass. If the chosen live item happens to be from a source with fee=10% exactly, the naive-10% guard may need adjustment, but Blinto/Klaravik use tiered fees so it is unlikely.",
+  "rca of the issue": "During the refactor the author wrote `crawler.compute_fees(doc['source'], new_bid, doc)` assuming `crawler` refers to the module. But in server.py line 32 the name `crawler` is bound to a `Crawler(db)` INSTANCE (via `from crawler import Crawler`). `compute_fees` lives at the module level (crawler.py:57) and is not a method on the class, so the attribute lookup fails at request time, producing an unhandled AttributeError -> HTTP 500. Reproduction: register push token, POST /api/live/watch any live url, then POST /api/auctions/{id}/refresh — observe 500 and the traceback in /var/log/supervisor/backend.err.log. Fix: either `from crawler import Crawler, compute_fees` and call `compute_fees(...)`, or `import crawler as crawler_mod` and use `crawler_mod.compute_fees(...)`."
+}

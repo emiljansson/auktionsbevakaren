@@ -24,7 +24,7 @@ import blocket
 import auctionet
 import commhub
 from fastapi import Header
-from crawler import Crawler
+from crawler import Crawler, compute_fees
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -610,7 +610,7 @@ async def refresh_auction(auction_id: str, request: Request, device_id: str = De
         raise HTTPException(status_code=400, detail="Objektet saknar länk och kan inte uppdateras.")
     data = await asyncio.to_thread(scraper.scrape_auction, doc["url"], None)
     new_bid = max(doc["current_bid"], data["current_bid"])
-    f = crawler.compute_fees(doc["source"], new_bid, doc)
+    f = compute_fees(doc["source"], new_bid, doc)
     buyer_fee, total_now = f["buyer_fee"], f["total_now"]
     now = datetime.now(timezone.utc).isoformat()
     history = doc.get("bid_history", [])
