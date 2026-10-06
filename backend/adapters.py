@@ -245,9 +245,13 @@ class BudiAdapter:
                     image = None
                 title = (img.get("alt") if img else None) or "Budi-objekt"
                 text = a.get_text(" ", strip=True)
+                price_el = a.select_one("span.budi-auctionobject__bid-current-amount") or a.select_one("div.budi-auctionobject__summary")
+                price = _price_from_text(price_el.get_text(" ", strip=True)) if price_el else None
+                if price is None:
+                    price = _price_from_text(text)
                 out.append({
                     "source": self.source, "title": title, "image": image,
-                    "current_bid": _price_from_text(text) or 0,
+                    "current_bid": price or 0,
                     "bid_count": _bids_from_text(text),
                     "ends_at": a.get("data-budi-auctionobject-endingdatetimeiso"),
                     "url": "https://www.budi.se" + href,

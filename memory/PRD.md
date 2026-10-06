@@ -343,3 +343,9 @@ Användare upplevde att "nya okända objekt dyker upp hela tiden" vid skroll. Or
 - Frontend `LiveFeed.jsx`: `page`-state ersätter load-more; "Föregående/Nästa" + "Sida X av Y · N objekt"; nollställs till sida 1 vid källbyte/sök; skrollar till toppen vid sidbyte. 10s-polling kvar men hämtar nuvarande sida (ankrad sida = inte vilset).
 - Verifierat: API page1 (slutar 09:50) vs page2 (10:03), total 4991/50 sidor; UI desktop + mobil 390px (inget spill), "Nästa" → sida 2 + toppscroll. Kräver ompublicering för live.
 - DATAKVALITET (noterat, ej åtgärdat): något objekt visar orimligt pris (t.ex. "Ismaskin Scotsman 201 812 550 kr") – trolig parse-bugg med hopslagna siffror; bör ses över.
+
+## 2026-10-06 — FIX: Orimliga Budi-priser (årtal ihopklistrat med bud)
+- Rotorsak: `BudiAdapter.discover()` (adapters.py) läste priset från hela kortets text via `_price_from_text`, vars regex `([\d][\d\s\.]*\d)\s*kr` slukade årtalet i titeln + priset när de stod intill varandra med bara mellanslag emellan (t.ex. "MV430, 2018 12 550 kr" → 201812550; "SB193, 2021 2 450 kr" → 20212450). Drabbade 28 Budi-objekt (endast Budi).
+- Fix: läser priset från det dedikerade elementet `span.budi-auctionobject__bid-current-amount` (fallback `div.budi-auctionobject__summary`, sedan gamla texten). Krävde även hantering av "0 kr" (objekt utan bud) i engångs-korrigeringen.
+- Korrigerade befintliga korrupta poster i `live_auctions` + räknade om `total_now` via `compute_fees`. Crawlern körde om med nya koden → 0 orimliga kvar.
+- Verifierat: API `GET /api/live/auctions?source=Budi` → inga priser > 50M; SB193 = 2450 kr (total 3552); MV430 = 12550 kr. Prisvisning behålls som auktionshuset anger (exkl./inkl. moms oförändrat per användarval).
