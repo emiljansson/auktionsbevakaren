@@ -69,7 +69,10 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
   const pm = val && posMeta[val.market_position];
   const tl = timeLeft(auction.ends_at);
   const chartData = (auction.bid_history || []).map((b) => ({ ...b }));
-  const highest = chartData.length ? Math.max(...chartData.map((d) => d.bid)) : auction.current_bid;
+  // Highest bid can never be lower than the current (live) bid — in an ascending
+  // auction the current bid IS the highest. Guard against stale/partial history
+  // (e.g. a single old point captured when first seen) showing a lower number.
+  const highest = Math.max(auction.current_bid || 0, ...chartData.map((d) => d.bid || 0), 0);
   const bidPriceDisplay = vatIncl ? auction.total_now : auction.current_bid;
 
   return (

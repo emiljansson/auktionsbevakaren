@@ -372,3 +372,8 @@ Användare upplevde att "nya okända objekt dyker upp hela tiden" vid skroll. Or
   - Sluttid: `event_id = end|{token}|{url}|{step}`. Sökbevakning: `kw|{token}|{watch_id}|{sha1(nya urls)}`.
 - Verifierat: 3 samtidiga claims → exakt 1 True; nytt bud-claim → True; index+TTL bekräftade. OBS: äkta push-verifiering kräver redeploy + verkligt bud (kan ej simuleras mot FCM härifrån).
 - Kvarstående gräns: om PRODUKTION kör egen separat MongoDB OCH telefonen är registrerad under flera tokens där, kan äkta cross-DB-dubbletter inte slås ihop (CommHub saknar tag). Redeploy av denna kod gör dock varje instans internt dubblettsäker; trolig verklig orsak var att produktionen körde ÄLDRE kod utan dedup-fixarna.
+
+## 2026-10-06 — FIX: Två olika budpriser i samma objekt (detaljvyn)
+- AuctionDetail.jsx: "Högsta bud" i Budhistorik-blocket beräknades som Math.max över bid_history. Vid en enda gammal historikpunkt (t.ex. 5 500 kr fångad när objektet först sågs) visades den trots att live current_bid stigit (10 100 kr) → två motstridiga siffror. Grafens platshållare visas vid <2 punkter, men highest läste ändå den enda punkten.
+- Fix: highest = Math.max(current_bid, ...bid_history.bid, 0). I en stigande auktion är aktuellt bud alltid det högsta, så "Högsta bud" blir aldrig lägre än "Nuvarande bud".
+- Verifierat i UI: Nuvarande bud = Högsta bud (36 000 kr) i detaljmodalen.
