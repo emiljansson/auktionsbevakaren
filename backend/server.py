@@ -547,8 +547,17 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
             d["bid_history"] = _bid_history(lv)
             continue
         sd = sold_map.get(d.get("url"))
-        if sd and sd.get("ends_at") and not d.get("ends_at"):
-            d["ends_at"] = sd["ends_at"]  # ended -> restore end time for badge/sort
+        if sd:
+            # Ended item: show the real FINAL (winning) price from the archive,
+            # not the last live bid we happened to observe before it closed.
+            if sd.get("ends_at") and not d.get("ends_at"):
+                d["ends_at"] = sd["ends_at"]
+            if sd.get("final_bid"):
+                d["current_bid"] = sd["final_bid"]
+            if sd.get("total_final"):
+                d["total_now"] = sd["total_final"]
+            if sd.get("bid_count") is not None:
+                d["bid_count"] = sd["bid_count"]
     # Sort: active items soonest-first, then ended (most recent first), then
     # items with no end time at all (e.g. Blocket classifieds) last.
     now_ts = datetime.now(timezone.utc)
