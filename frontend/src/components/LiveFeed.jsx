@@ -28,7 +28,7 @@ export const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
     data-testid={`live-card-${encodeURIComponent(a.url).slice(-16)}`}
     className="group flex flex-col overflow-hidden rounded-xl border border-slate-800 bg-[#111827] transition-colors hover:border-slate-700"
   >
-    <div className="relative h-36 overflow-hidden bg-slate-900">
+    <div className="relative h-48 overflow-hidden bg-slate-900">
       <img src={a.image} alt={a.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
         onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1603816885871-c122a9ff8d40?w=600&q=80"; }} />
       <div className="absolute inset-0 bg-gradient-to-t from-[#111827] to-transparent" />
@@ -238,7 +238,7 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
           Inga live-objekt ännu. Klicka "Synka nu" eller vänta medan crawlern hämtar.
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" data-testid="live-grid">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="live-grid">
           {items.map((a) => <LiveCard key={a.url} a={a} onWatch={handleWatch} watching={watching} locked={!push?.canWatch} onOpen={onOpen} />)}
         </div>
       )}
