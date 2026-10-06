@@ -351,6 +351,15 @@ async def push_register(payload: PushRegister, request: Request, device_id: str 
             {"$or": [{"device_id": {"$exists": False}}, {"device_id": None}]},
             {"$set": {"device_id": device_id}},
         )
+    # A push token identifies ONE phone. If this token is still registered under
+    # other device_ids (typically after a PWA re-install created a fresh
+    # device_id while FCM kept the same token), unset it there so the notifier
+    # can never double-send to the same phone — including pushes for items the
+    # user already deleted on their current device.
+    await db.devices.update_many(
+        {"token": token, "device_id": {"$ne": device_id}},
+        {"$unset": {"token": ""}},
+    )
     return {"ok": True}
 
 
@@ -636,9 +645,19 @@ async def refresh_auction(auction_id: str, request: Request, device_id: str = De
 
 @api_router.delete("/auctions/{auction_id}")
 async def delete_auction(auction_id: str, device_id: str = Depends(require_device)):
-    res = await db.auctions.delete_one({"id": auction_id, "device_id": device_id})
-    if res.deleted_count == 0:
+    doc = await db.auctions.find_one({"id": auction_id, "device_id": device_id})
+    if not doc:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
+    await db.auctions.delete_one({"id": auction_id, "device_id": device_id})
+    # Also remove any leftover copy of this exact item on orphan device_ids that
+    # share this phone's push token, so deleting truly stops its notifications.
+    dev = await db.devices.find_one({"device_id": device_id})
+    token = (dev or {}).get("token")
+    if token and doc.get("url"):
+        sib = [d["device_id"] async for d in
+               db.devices.find({"token": token}, {"device_id": 1})]
+        if sib:
+            await db.auctions.delete_many({"url": doc["url"], "device_id": {"$in": sib}})
     return {"ok": True}
 
 
@@ -943,6 +962,7 @@ async def startup():
     except Exception:
         logger.exception("could not create sold_items indexes")
     crawler.start()
+    asyncio.create_task(_dedupe_device_tokens())
     asyncio.create_task(_watch_notifier())
     try:
         await db.keyword_watches.create_index("device_id")
@@ -950,6 +970,34 @@ async def startup():
     except Exception:
         logger.exception("could not create keyword_watches index")
     asyncio.create_task(_keyword_watch_loop())
+
+
+async def _dedupe_device_tokens():
+    """One-time safety sweep (runs at startup and is idempotent): a push token
+    must belong to exactly ONE device. PWA re-installs can leave several device
+    records holding the same token, which makes the notifier push duplicates to
+    the same phone — including items the user deleted on their current device.
+    Keep the most recently updated device per token and clear the token on the
+    rest so only one device pushes."""
+    await asyncio.sleep(10)
+    try:
+        by_token = {}
+        async for d in db.devices.find({"token": {"$ne": None}},
+                                       {"device_id": 1, "token": 1, "updated_at": 1}):
+            by_token.setdefault(d["token"], []).append(d)
+        cleared = 0
+        for token, devs in by_token.items():
+            if len(devs) < 2:
+                continue
+            devs.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+            stale = [d["device_id"] for d in devs[1:]]
+            res = await db.devices.update_many(
+                {"device_id": {"$in": stale}}, {"$unset": {"token": ""}})
+            cleared += res.modified_count
+        if cleared:
+            logger.info("dedupe_device_tokens: cleared token on %d stale devices", cleared)
+    except Exception:
+        logger.exception("dedupe_device_tokens")
 
 
 async def _watch_notifier():
@@ -962,11 +1010,16 @@ async def _watch_notifier():
         try:
             if commhub.enabled():
                 now = datetime.now(timezone.utc)
+                seen = set()  # (token, url) already handled this pass
                 async for a in db.auctions.find({"device_id": {"$ne": None}}):
                     dev = await db.devices.find_one({"device_id": a.get("device_id")})
                     token = (dev or {}).get("token")
                     if not token:
                         continue
+                    key = (token, a.get("url"))
+                    if key in seen:
+                        continue
+                    seen.add(key)
                     lv = await db.live_auctions.find_one({"url": a["url"]}, {"_id": 0})
                     if not lv:
                         continue
