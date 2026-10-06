@@ -109,22 +109,26 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
   const [loading, setLoading] = useState(true);
   const [watching, setWatching] = useState(null);
   const [syncing, setSyncing] = useState(false);
-  const [limit, setLimit] = useState(120);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const qRef = useRef(q);
   qRef.current = q;
   const srcRef = useRef(source);
   srcRef.current = source;
-  const limitRef = useRef(limit);
-  limitRef.current = limit;
+  const pageRef = useRef(page);
+  pageRef.current = page;
 
   const load = useCallback(async () => {
     try {
-      const [st, list] = await Promise.all([
+      const [st, resp] = await Promise.all([
         api.liveStatus(),
-        api.liveAuctions({ source: srcRef.current, q: qRef.current || undefined, limit: limitRef.current }),
+        api.liveAuctions({ source: srcRef.current, q: qRef.current || undefined, page: pageRef.current, page_size: 100 }),
       ]);
       setStatus(st);
-      setItems(list);
+      setItems(resp.items || []);
+      setPages(resp.pages || 1);
+      setTotal(resp.total || 0);
     } catch {
       /* keep previous */
     } finally {
@@ -138,9 +142,11 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
     return () => clearInterval(t);
   }, [load]);
 
-  // Reset paging when the filter/search changes
-  useEffect(() => { setLimit(120); }, [source]);
-  useEffect(() => { load(); }, [source, limit, load]);
+  // Reset to first page when the filter changes; reload on page/source change.
+  useEffect(() => { setPage(1); }, [source]);
+  useEffect(() => { load(); }, [source, page, load]);
+  // Jump back to the top when the user changes page so they don't lose their place.
+  useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [page]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -206,7 +212,7 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (setLimit(120), load())}
+          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (setPage(1), load())}
             placeholder="Sök i live-flödet (t.ex. grävmaskin, traktor)..." data-testid="live-search"
             className="border-slate-700 bg-slate-900 pl-9 text-slate-100 placeholder:text-slate-600" />
         </div>
@@ -232,11 +238,20 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
         </div>
       )}
 
-      {!loading && items.length >= limit && (
-        <div className="mt-6 flex justify-center">
-          <Button variant="outline" onClick={() => setLimit((l) => l + 120)} data-testid="load-more-button"
-            className="border-slate-700 text-slate-200 hover:bg-slate-800">
-            Ladda fler objekt
+      {!loading && items.length > 0 && (
+        <div className="mt-6 flex items-center justify-center gap-3" data-testid="pagination">
+          <Button variant="outline" disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="prev-page-button"
+            className="border-slate-700 text-slate-200 hover:bg-slate-800 disabled:opacity-40">
+            Föregående
+          </Button>
+          <span className="text-sm text-slate-400" data-testid="page-indicator">
+            Sida {page} av {pages} · {total} objekt
+          </span>
+          <Button variant="outline" disabled={page >= pages}
+            onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="next-page-button"
+            className="border-slate-700 text-slate-200 hover:bg-slate-800 disabled:opacity-40">
+            Nästa
           </Button>
         </div>
       )}

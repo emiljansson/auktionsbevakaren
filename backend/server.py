@@ -726,8 +726,9 @@ async def live_status():
 
 
 @api_router.get("/live/auctions")
-async def live_auctions(request: Request, source: Optional[str] = None, q: Optional[str] = None, limit: int = 120):
-    limit = max(1, min(limit, 500))
+async def live_auctions(request: Request, source: Optional[str] = None, q: Optional[str] = None, page: int = 1, page_size: int = 100):
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
     # On search, augment the feed with live Tradera + Blocket results (not background-crawled).
     if q and len((q or "").strip()) >= 2:
         _rate_limit(request, "search", 15, 20)  # block burst searches, keep normal polling free
@@ -770,7 +771,7 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
             {"title": {"$regex": re.escape(q.strip()[:100]), "$options": "i"}},
             {"search_q": key},
         ]
-    docs = await db.live_auctions.find(query, {"_id": 0}).to_list(5000)
+    docs = await db.live_auctions.find(query, {"_id": 0}).sort("ends_at", 1).to_list(5000)
     now = datetime.now(timezone.utc)
     far = datetime.max.replace(tzinfo=timezone.utc)
 
@@ -802,7 +803,11 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
                     merged.append(g[i])
             i += 1
         live = merged
-    return live[:limit]
+    total = len(live)
+    start = (page - 1) * page_size
+    items = live[start:start + page_size]
+    return {"items": items, "total": total, "page": page, "page_size": page_size,
+            "pages": max(1, (total + page_size - 1) // page_size)}
 
 
 @api_router.post("/live/sync")
