@@ -1057,6 +1057,8 @@ async def _fetch_item_refresh(source, url):
         return await ps_playwright.refresh_item(url)
     if source == "Tradera":
         return await tradera.refresh_item(url)
+    if source == "Auctionet":
+        return await auctionet.refresh_item(url)
     ad = adapters.adapter_for_source(source)
     if ad:
         return await ad.refresh_item(url)
@@ -1239,7 +1241,10 @@ async def _watch_notifier():
                     seen.add(key)
                     lv = await db.live_auctions.find_one({"url": a["url"]}, {"_id": 0})
                     if not lv:
-                        continue
+                        # On-demand sources (Auctionet/Tradera/Blocket) may have no
+                        # live row — fall back to the watched doc, which the 30-min
+                        # auto-refresh keeps current, so bid alerts still fire.
+                        lv = a
                     changes = {}
                     title = (lv.get("title") or a.get("title") or "Objekt")[:70]
                     data = {"url": a.get("url") or ""}

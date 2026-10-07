@@ -102,6 +102,62 @@ def _approx_total(bid):
     return bid + round(bid * 0.25) + 80 if bid else 0
 
 
+def _extract_vip(html):
+    """Auctionet renders the full lot object in a `window.vipDataAtPageLoad = {...}`
+    inline script. Brace-match it out and return the parsed `item`."""
+    i = html.find("window.vipDataAtPageLoad")
+    if i < 0:
+        return None
+    j = html.find("=", i) + 1
+    depth, start = 0, None
+    for k in range(j, len(html)):
+        ch = html[k]
+        if ch == "{":
+            if start is None:
+                start = k
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    import json
+                    return (json.loads(html[start:k + 1]) or {}).get("item")
+                except Exception:
+                    return None
+    return None
+
+
+async def refresh_item(url):
+    """Per-item refresh for a watched Auctionet lot: authoritative current bid,
+    bid count and end time read from the lot page. Prices are forced to SEK via
+    cookies (the server IP otherwise geolocates to USD)."""
+    try:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=20, follow_redirects=True) as c:
+            c.cookies.set("currency", "SEK", domain="auctionet.com")
+            c.cookies.set("locale", "sv", domain="auctionet.com")
+            html = (await c.get(url, headers={**HEADERS, "Accept": "text/html,application/xhtml+xml"})).text
+    except Exception as e:
+        logger.warning("Auctionet refresh failed for %s: %s", url, e)
+        return None
+    it = _extract_vip(html)
+    if not it:
+        return None
+    bids = it.get("bids") or []
+    highest = max((b.get("amount") or 0) for b in bids) if bids else 0
+    ends_at = None
+    if it.get("ends_at"):
+        try:
+            ends_at = datetime.fromtimestamp(int(it["ends_at"]), tz=timezone.utc).isoformat()
+        except Exception:
+            ends_at = None
+    res = {"bid_count": len(bids)}
+    if highest:
+        res["current_bid"] = highest
+    if ends_at:
+        res["ends_at"] = ends_at
+    return res
+
+
 _ended_cache = {}  # q(lower) -> (timestamp, [sold comps])
 
 

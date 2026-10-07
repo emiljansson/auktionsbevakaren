@@ -387,3 +387,14 @@ Användare upplevde att "nya okända objekt dyker upp hela tiden" vid skroll. Or
   - Engångs-backfill körd: alla 3 bevakade Tradera-objekt fick korrekt sluttid.
 - Verifierat: tradera.refresh_item returnerar korrekt ends_at för alla 3; DB: 0 Tradera-bevakningar saknar nu sluttid; backend frisk.
 - Kvarstår (ej åtgärdat denna gång): Auctionet bevakade objekt saknar `refresh_item` (self-healar ej). Blocket är fastpris → saknad sluttid är förväntat. PS Auction self-healar via förbättrade loopen (ScrapingBee, 30 min).
+
+## 2026-10-06 — FIX: Auctionet ("Auktionner") budbevakning + nedräkningsklocka
+- Rapport: Auctionet fungerade inte med budbevakning och nedräkningsklocka. Bevakade Auctionet-objekt saknade ends_at (2/2) och fick aldrig uppdaterat bud → ingen nedräkning, inga budnotiser.
+- Orsak: Auctionet (on-demand) saknade `refresh_item`. Dessutom kräver notifiern en `live_auctions`-rad som on-demand-objekt ofta saknar.
+- Fix:
+  - auctionet.py: ny `refresh_item(url)` som läser lot-sidans inbäddade `window.vipDataAtPageLoad`-JSON → ends_at (unix→ISO), högsta bud + antal bud ur `bids[]`. Tvingar SEK via cookies currency=SEK/locale=sv (serverns IP ger annars USD). Viktigt: använd Accept: text/html (modulens default Accept: application/json ger 406 på HTML-sidan).
+  - Kopplad in i `_fetch_item_refresh` (server.py).
+  - Notifiern (`_watch_notifier`): faller nu tillbaka på den bevakade raden `a` när ingen live_auctions-rad finns, så budnotiser fungerar även för Auctionet/Tradera/Blocket (auto-refresh håller `a` färsk var 30:e min).
+  - Engångs-backfill: båda bevakade Auctionet-objekten fick ends_at + uppdaterat bud (8500, 17400) + antal bud.
+- Verifierat: refresh_item returnerar korrekt SEK-bud/sluttid; DB 0/2 saknar ends_at; backend frisk. OBS: äkta budpush kräver redeploy + verkligt nytt bud.
+- Status sluttider bevakade: Auctionet 0/2, Tradera 0/3, Blocket 1/1 (fastpris, förväntat), PS Auction 1/1 (self-healar via 30-min-loopen/ScrapingBee).
