@@ -404,3 +404,11 @@ Användare upplevde att "nya okända objekt dyker upp hela tiden" vid skroll. Or
 - Fix: tradera.refresh_item läser nu `leadingBid`/`leadingBidAmount` (escaped-aware regex) som current_bid + bidCount/numberOfBids/totalBids. Objekt utan bud ger inget leadingBid → current_bid=0 (korrekt).
 - Backfill: Festool T15+3 fick current_bid=500 (1 bud); övriga 2 saknar bud (0). Nu uppdaterar auto-refresh Tradera-bud var 30:e min → notifiern upptäcker höjningar och pushar (via live_auctions-fallback till bevakad rad).
 - Verifierat: refresh_item returnerar current_bid för auktionsobjekt med bud; backend frisk.
+
+## 2026-10-06 — VERIFIERING: budbevakning + nedräkning för ALLA 12 källor
+Empiriskt test av refresh_item mot riktiga live-objekt per källa (ends_at + current_bid):
+- Fungerar (per-objekt-refresh ger bud + sluttid): Klaravik, Fabeo, Retrade, Netauktion, Tovek, Riksauktioner, Budi, Tradera, Auctionet ✅
+- Blinto ✅: per-objekt-refresh är avsiktligt no-op (sparar ScrapingBee-krediter); hela katalogen uppdateras via bakgrundens discover (JS-render) → bud+sluttid hålls färska i live_auctions, notifiern läser den.
+- Kronofogden ➖ N/A: exekutiva försäljningar, budgivning sker på extern plattform; vi listar bara (inget bud/nedräkning) — by design.
+- Blocket ➖ N/A: fastpris/"köp nu", ingen budgivning/sluttid — by design.
+Slutsats: alla källor som KAN ha budbevakning+nedräkning fungerar. Inga kodändringar behövdes denna tur (Tradera/Auctionet fixade i tidigare turer). Notifiern faller tillbaka på bevakad rad när live_auctions-rad saknas.
