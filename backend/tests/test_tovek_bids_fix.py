@@ -42,7 +42,7 @@ def test_status_all_8_sources():
     assert data["running"] is True
     sources = {s["source"]: s for s in data["sites"]}
     expected = ["Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion",
-                "Kronofogden", "Tovek", "PS Auction"]
+                "Tovek", "PS Auction"]
     for src in expected:
         assert src in sources, f"Missing source {src}; got {list(sources)}"
         err = sources[src].get("error")

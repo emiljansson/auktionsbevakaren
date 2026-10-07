@@ -491,31 +491,6 @@ class NetauktionAdapter:
         return res or None
 
 
-class KronofogdenAdapter:
-    """Kronofogden annonserar exekutiva försäljningar (mest fastigheter); själva
-    nätbudgivningen sker på extern plattform. Vi listar aktuella försäljningar
-    som poster (titel, datum, länk) utan bud."""
-    source = "Kronofogden"
-    base = "https://auktionstorget.kronofogden.se"
-
-    async def discover(self):
-        soup = BeautifulSoup(await _get(self.base + "/Aktuellaforsaljningar.html"), "lxml")
-        out, seen = [], set()
-        for a in soup.find_all("a", href=True):
-            txt = a.get_text(" ", strip=True)
-            if re.search(r"/\d+\.html", a["href"]) and re.search(r"\d{4}-\d{2}-\d{2}", txt):
-                url = a["href"] if a["href"].startswith("http") else self.base + "/" + a["href"].lstrip("/")
-                if url in seen:
-                    continue
-                seen.add(url)
-                out.append({"source": self.source, "title": re.sub(r"\s+", " ", txt), "image": None,
-                            "current_bid": 0, "url": url})
-        return out
-
-    async def refresh_item(self, url):
-        return None
-
-
 # ---- Tovek (Next.js Server Actions, no login needed) ----
 TOVEK_ACT_AUCTIONS = "7f8f949b85599ee0545667288ad781b5e46ed3822d"
 TOVEK_ACT_ITEMS = "7f88556099d83557895271d6f6135913755dfc8976"

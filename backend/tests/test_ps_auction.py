@@ -6,7 +6,7 @@ import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://auction-watch.preview.emergentagent.com").rstrip("/")
 PS_URL_RE = re.compile(r"^https://psauction\.se/item/view/\d+/")
-EXPECTED_SOURCES = {"Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion", "Kronofogden", "Tovek", "PS Auction"}
+EXPECTED_SOURCES = {"Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion", "Tovek", "PS Auction"}
 
 
 @pytest.fixture(scope="module")

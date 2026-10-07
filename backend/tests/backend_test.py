@@ -15,7 +15,7 @@ API = f"{BASE_URL}/api"
 
 EXPECTED_SOURCES = {
     "PS Auction", "Klaravik", "Blinto", "Tovek", "Netauktion",
-    "Retrade", "Budi", "Fabeo", "Kronofogden",
+    "Retrade", "Budi", "Fabeo",
 }
 
 

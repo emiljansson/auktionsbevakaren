@@ -42,7 +42,7 @@ def test_status_running_and_all_sites():
     data = r.json()
     assert data["running"] is True
     sources = {s["source"]: s for s in data["sites"]}
-    for expected in ["Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion", "Kronofogden", "Tovek"]:
+    for expected in ["Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion", "Tovek"]:
         assert expected in sources, f"Missing source {expected}"
         err = sources[expected].get("error")
         # tolerate transient but flag persistent
@@ -139,7 +139,7 @@ def test_regression_other_sources_have_title_url(all_auctions):
     by_src = {}
     for it in all_auctions:
         by_src.setdefault(it.get("source"), []).append(it)
-    for src in ["Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion", "Kronofogden"]:
+    for src in ["Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion"]:
         items = by_src.get(src, [])
         assert len(items) > 0, f"No items for {src}"
         bad = [i for i in items if not (i.get("title") or "").strip() or not (i.get("url") or "").startswith("http")]

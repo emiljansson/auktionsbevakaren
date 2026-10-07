@@ -24,7 +24,6 @@ SOURCES = {
     "retrade": "Retrade",
     "budi": "Budi",
     "fabeo": "Fabeo",
-    "kronofogd": "Kronofogden",
 }
 
 HEADERS = {

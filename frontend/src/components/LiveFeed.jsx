@@ -68,8 +68,8 @@ export const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
           </>
         ) : (
           <>
-            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">{a.source === "Kronofogden" ? "Exekutiv försäljning" : "Inga bud ännu"}</p>
-            <p className="font-heading text-sm font-semibold text-slate-300">{a.source === "Kronofogden" ? "Se auktion för detaljer" : "Se auktion"}</p>
+            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Inga bud ännu</p>
+            <p className="font-heading text-sm font-semibold text-slate-300">Se auktion</p>
           </>
         )}
         {!a.fixed_price && (a.current_bid > 0 || a.starting_price > 0) && a.total_now > 0 && (

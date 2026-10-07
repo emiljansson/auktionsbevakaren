@@ -38,7 +38,7 @@ HEADERS = {
     "Accept-Language": "sv-SE,sv;q=0.9,en;q=0.8",
 }
 
-ACTIVE_SITES = {"Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion", "Kronofogden"}
+ACTIVE_SITES = {"Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion"}
 
 
 def _to_int(s):

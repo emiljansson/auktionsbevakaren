@@ -412,3 +412,13 @@ Empiriskt test av refresh_item mot riktiga live-objekt per källa (ends_at + cur
 - Kronofogden ➖ N/A: exekutiva försäljningar, budgivning sker på extern plattform; vi listar bara (inget bud/nedräkning) — by design.
 - Blocket ➖ N/A: fastpris/"köp nu", ingen budgivning/sluttid — by design.
 Slutsats: alla källor som KAN ha budbevakning+nedräkning fungerar. Inga kodändringar behövdes denna tur (Tradera/Auctionet fixade i tidigare turer). Notifiern faller tillbaka på bevakad rad när live_auctions-rad saknas.
+
+## 2026-10-07 — BORTTAGET: Kronofogden som källa (på användarens begäran)
+- Tog bort alla referenser till Kronofogden:
+  - adapters.py: raderade hela `KronofogdenAdapter`-klassen (var redan ej i ENABLED/SOURCE_STATUS).
+  - scraper.py: tog bort `"kronofogd": "Kronofogden"` ur SOURCES-mappningen.
+  - frontend LiveFeed.jsx: tog bort Kronofogden-specialfallet ("Exekutiv försäljning"/"Se auktion för detaljer") → standard "Inga bud ännu"/"Se auktion".
+  - frontend sources.js: tog bort Kronofogden badge-färg.
+  - tester: tog bort "Kronofogden" ur förväntade källistor i alla testfiler.
+  - DB: inga Kronofogden-dokument fanns (0 i live_auctions/auctions/sold_items).
+- Verifierat: grep i backend/*.py + frontend/src → inga träffar; `import adapters, scraper` OK; backend running; frontend renderar utan "Kronofogden" i sidtexten; "Övervakar 12 källor" oförändrat (Kronofogden ingick ej i räkningen).

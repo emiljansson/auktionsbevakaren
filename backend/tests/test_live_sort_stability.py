@@ -137,7 +137,7 @@ def test_ps_auction_exact_end_times():
 
 EXPECTED_SOURCES = {
     "Klaravik", "Budi", "Fabeo", "Retrade", "Netauktion",
-    "Kronofogden", "Tovek", "PS Auction",
+    "Tovek", "PS Auction",
 }
 
 
