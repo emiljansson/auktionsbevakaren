@@ -93,7 +93,8 @@ def _parse_page(html):
 
 
 _PAT_ENDDATE = re.compile(r'endDate\\?"\s*:\s*\\?"([^"\\]+)')
-_PAT_LDPRICE = re.compile(r'"price"\s*:\s*"?(\d+)"?')
+_PAT_LEADBID = re.compile(r'leadingBid(?:Amount)?\\?"\s*:\s*\\?"?(\d+)')
+_PAT_BIDCOUNT = re.compile(r'(?:bidCount|numberOfBids|totalBids)\\?"\s*:\s*(\d+)')
 
 
 def _norm_iso(s):
@@ -112,21 +113,27 @@ def _norm_iso(s):
 
 
 async def refresh_item(url):
-    """Per-item refresh for a watched Tradera listing: read the authoritative end
-    time from the item page (search cards sometimes show a relative time instead
-    of an absolute "Sluttid", leaving watched items without an end time)."""
+    """Per-item refresh for a watched Tradera listing: authoritative end time and
+    current (leading) bid from the item page. Search cards sometimes show a
+    relative time instead of an absolute "Sluttid" and omit the live bid, leaving
+    watched items without an end time or bid-change detection."""
     try:
         async with httpx.AsyncClient(headers=HEADERS, timeout=20, follow_redirects=True) as c:
             html = (await c.get(url)).text
     except Exception as e:
         logger.warning("Tradera refresh failed for %s: %s", url, e)
         return None
-    ends_at = _norm_iso(_PAT_ENDDATE.search(html).group(1)) if _PAT_ENDDATE.search(html) else None
-    bud = re.search(r'bidCount\\?"\s*:\s*(\d+)', html)
-    bid_count = int(bud.group(1)) if bud else None
+    em = _PAT_ENDDATE.search(html)
+    ends_at = _norm_iso(em.group(1)) if em else None
+    bm = _PAT_LEADBID.search(html)
+    current_bid = int(bm.group(1)) if bm else None
+    cm = _PAT_BIDCOUNT.search(html)
+    bid_count = int(cm.group(1)) if cm else None
     res = {}
     if ends_at:
         res["ends_at"] = ends_at
+    if current_bid:
+        res["current_bid"] = current_bid
     if bid_count is not None:
         res["bid_count"] = bid_count
     return res or None

@@ -398,3 +398,9 @@ Användare upplevde att "nya okända objekt dyker upp hela tiden" vid skroll. Or
   - Engångs-backfill: båda bevakade Auctionet-objekten fick ends_at + uppdaterat bud (8500, 17400) + antal bud.
 - Verifierat: refresh_item returnerar korrekt SEK-bud/sluttid; DB 0/2 saknar ends_at; backend frisk. OBS: äkta budpush kräver redeploy + verkligt nytt bud.
 - Status sluttider bevakade: Auctionet 0/2, Tradera 0/3, Blocket 1/1 (fastpris, förväntat), PS Auction 1/1 (self-healar via 30-min-loopen/ScrapingBee).
+
+## 2026-10-06 — FIX: Tradera budbevakning (aktuellt bud saknades)
+- Fråga från användaren: "Har tradera samma bevakningsproblem?" Svar: sluttiden var redan fixad, MEN budbevakningen var inte komplett — tradera.refresh_item hämtade bara ends_at + bid_count, INTE aktuellt bud. Därför upptäcktes aldrig nya bud på Tradera (ingen budpush).
+- Fix: tradera.refresh_item läser nu `leadingBid`/`leadingBidAmount` (escaped-aware regex) som current_bid + bidCount/numberOfBids/totalBids. Objekt utan bud ger inget leadingBid → current_bid=0 (korrekt).
+- Backfill: Festool T15+3 fick current_bid=500 (1 bud); övriga 2 saknar bud (0). Nu uppdaterar auto-refresh Tradera-bud var 30:e min → notifiern upptäcker höjningar och pushar (via live_auctions-fallback till bevakad rad).
+- Verifierat: refresh_item returnerar current_bid för auktionsobjekt med bud; backend frisk.
