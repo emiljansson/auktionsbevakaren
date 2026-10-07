@@ -1055,6 +1055,8 @@ async def _fetch_item_refresh(source, url):
     if source == "PS Auction":
         import ps_playwright
         return await ps_playwright.refresh_item(url)
+    if source == "Tradera":
+        return await tradera.refresh_item(url)
     ad = adapters.adapter_for_source(source)
     if ad:
         return await ad.refresh_item(url)
@@ -1083,33 +1085,37 @@ async def _watch_auto_refresh():
                     if end and end < now:
                         continue  # ended — nothing to refresh
                     res = await _fetch_item_refresh(s.get("source"), url)
-                    if not res or not res.get("current_bid"):
+                    if not res:
                         continue
-                    new_bid = res["current_bid"]
-                    # Build the fee context from the live doc's learned inputs so
-                    # exact per-object fees (e.g. Tovek slagavgift) survive.
-                    lv = await db.live_auctions.find_one(
-                        {"url": url},
-                        {"fee_inputs": 1, "starting_price": 1, "vat": 1})
-                    ctx = dict((lv or {}).get("fee_inputs") or {})
-                    ctx.setdefault("fee_excl", s.get("buyer_fee_excl"))
-                    ctx["starting_price"] = (lv or {}).get("starting_price") or s.get("starting_price")
-                    if (lv or {}).get("vat") is not None:
-                        ctx["vat"] = lv["vat"]
-                    for k in ("fee_excl", "fee_vat", "vat"):
-                        if res.get(k) is not None:
-                            ctx[k] = res[k]
-                    f = compute_fees(s.get("source"), new_bid, ctx)
-                    changes = {
-                        "current_bid": new_bid, "buyer_fee": f["buyer_fee"],
-                        "buyer_fee_excl": f["buyer_fee_excl"], "fee_known": f["fee_known"],
-                        "fee_note": f["fee_note"], "vat": f["vat"],
-                        "total_now": f["total_now"], "updated_at": now.isoformat(),
-                    }
+                    changes = {"updated_at": now.isoformat()}
+                    new_bid = res.get("current_bid")
+                    if new_bid:
+                        # Build the fee context from the live doc's learned inputs so
+                        # exact per-object fees (e.g. Tovek slagavgift) survive.
+                        lv = await db.live_auctions.find_one(
+                            {"url": url},
+                            {"fee_inputs": 1, "starting_price": 1, "vat": 1})
+                        ctx = dict((lv or {}).get("fee_inputs") or {})
+                        ctx.setdefault("fee_excl", s.get("buyer_fee_excl"))
+                        ctx["starting_price"] = (lv or {}).get("starting_price") or s.get("starting_price")
+                        if (lv or {}).get("vat") is not None:
+                            ctx["vat"] = lv["vat"]
+                        for k in ("fee_excl", "fee_vat", "vat"):
+                            if res.get(k) is not None:
+                                ctx[k] = res[k]
+                        f = compute_fees(s.get("source"), new_bid, ctx)
+                        changes.update({
+                            "current_bid": new_bid, "buyer_fee": f["buyer_fee"],
+                            "buyer_fee_excl": f["buyer_fee_excl"], "fee_known": f["fee_known"],
+                            "fee_note": f["fee_note"], "vat": f["vat"],
+                            "total_now": f["total_now"],
+                        })
                     if res.get("bid_count") is not None:
                         changes["bid_count"] = res["bid_count"]
                     if res.get("ends_at"):
                         changes["ends_at"] = res["ends_at"]
+                    if len(changes) <= 1:  # only updated_at — nothing worth writing
+                        continue
                     await db.auctions.update_many({"url": url}, {"$set": changes})
                     await db.live_auctions.update_one({"url": url}, {"$set": changes})
                     await asyncio.sleep(2)  # be gentle on proxies

@@ -92,6 +92,46 @@ def _parse_page(html):
     return out
 
 
+_PAT_ENDDATE = re.compile(r'endDate\\?"\s*:\s*\\?"([^"\\]+)')
+_PAT_LDPRICE = re.compile(r'"price"\s*:\s*"?(\d+)"?')
+
+
+def _norm_iso(s):
+    """Tradera embeds end times like 2026-11-25T10:12:45.4800000Z (7 fractional
+    digits). Normalise to a parseable UTC ISO string."""
+    if not s:
+        return None
+    s = s.strip().replace("Z", "+00:00")
+    m = re.match(r"(.*\.\d{6})\d*(\+\d{2}:\d{2})$", s)  # trim >6 fractional digits
+    if m:
+        s = m.group(1) + m.group(2)
+    try:
+        return datetime.fromisoformat(s).astimezone(timezone.utc).isoformat()
+    except ValueError:
+        return None
+
+
+async def refresh_item(url):
+    """Per-item refresh for a watched Tradera listing: read the authoritative end
+    time from the item page (search cards sometimes show a relative time instead
+    of an absolute "Sluttid", leaving watched items without an end time)."""
+    try:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=20, follow_redirects=True) as c:
+            html = (await c.get(url)).text
+    except Exception as e:
+        logger.warning("Tradera refresh failed for %s: %s", url, e)
+        return None
+    ends_at = _norm_iso(_PAT_ENDDATE.search(html).group(1)) if _PAT_ENDDATE.search(html) else None
+    bud = re.search(r'bidCount\\?"\s*:\s*(\d+)', html)
+    bid_count = int(bud.group(1)) if bud else None
+    res = {}
+    if ends_at:
+        res["ends_at"] = ends_at
+    if bid_count is not None:
+        res["bid_count"] = bid_count
+    return res or None
+
+
 async def search(q, max_items=150):
     q = (q or "").strip()
     if len(q) < 2:

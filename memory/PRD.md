@@ -377,3 +377,13 @@ Användare upplevde att "nya okända objekt dyker upp hela tiden" vid skroll. Or
 - AuctionDetail.jsx: "Högsta bud" i Budhistorik-blocket beräknades som Math.max över bid_history. Vid en enda gammal historikpunkt (t.ex. 5 500 kr fångad när objektet först sågs) visades den trots att live current_bid stigit (10 100 kr) → två motstridiga siffror. Grafens platshållare visas vid <2 punkter, men highest läste ändå den enda punkten.
 - Fix: highest = Math.max(current_bid, ...bid_history.bid, 0). I en stigande auktion är aktuellt bud alltid det högsta, så "Högsta bud" blir aldrig lägre än "Nuvarande bud".
 - Verifierat i UI: Nuvarande bud = Högsta bud (36 000 kr) i detaljmodalen.
+
+## 2026-10-06 — FIX: Tradera ("Radera") bevakade objekt saknade sluttid
+- Rapport: "Radera har tappat sluttider, iallafall på bevakade objekt" (Radera = autokorrigering av Tradera). 3/3 bevakade Tradera-objekt hade ends_at=None (även Auctionet 2/2, Blocket 1/1, PS Auction 1/1).
+- Orsak: Tradera-sökkortet visar ibland relativ tid ("x dagar kvar") i stället för absolut "Sluttid <datum>", så ends_at blev None vid bevakning. Tradera/Auctionet/Blocket saknade `refresh_item`, och auto-refresh-loopen hoppade över objekt utan nytt current_bid → sluttiden lagades aldrig.
+- Fix:
+  - tradera.py: ny `refresh_item(url)` som läser auktoritativ sluttid från objektsidans inbäddade (escaped) JSON `endDate` + normaliserar ISO (7 decimaler → 6). Kopplad in i `_fetch_item_refresh` (server.py).
+  - `_watch_auto_refresh` (server.py): uppdaterar nu ends_at/bid_count även när inget nytt bud finns (tidigare `continue` om current_bid saknades). 
+  - Engångs-backfill körd: alla 3 bevakade Tradera-objekt fick korrekt sluttid.
+- Verifierat: tradera.refresh_item returnerar korrekt ends_at för alla 3; DB: 0 Tradera-bevakningar saknar nu sluttid; backend frisk.
+- Kvarstår (ej åtgärdat denna gång): Auctionet bevakade objekt saknar `refresh_item` (self-healar ej). Blocket är fastpris → saknad sluttid är förväntat. PS Auction self-healar via förbättrade loopen (ScrapingBee, 30 min).
