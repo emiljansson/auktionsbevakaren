@@ -429,3 +429,12 @@ Slutsats: alla källor som KAN ha budbevakning+nedräkning fungerar. Inga kodän
 - Default: AV (säkrast). backend/.env (preview) satt till PUSH_SEND_ENABLED=false. 
 - KRÄVS I PRODUKTION: sätt PUSH_SEND_ENABLED=true i produktionens secrets, annars skickas inga pushar i produktion heller.
 - Verifierat (preview): enabled=True, SEND_ENABLED=False, send_to_token→{skipped,push_send_disabled}; backend running.
+
+## 2026-10-08 — FIX: AI-granskning modal (mobil) + för breda liknelser
+1) Modal växte utanför skärmen på mobil efter AI-granskning:
+   - AuctionDetail.jsx DialogContent: max-h-[92vh] → max-h-[90dvh] (vh räknade in ytan bakom mobilens adressfält → toppen/stängknappen hamnade utanför). La även till w-[calc(100%-1.5rem)] (marginal på mobil), overflow-x-hidden och p-4 sm:p-6.
+2) AI-liknelser för breda (t.ex. "Flakmoped Grolle" → tre Grolle-TRAKTORER):
+   - Rotorsak: _key_tokens klassade bara VERSALER som märke, så normal-versaler ("Flakmoped","Grolle") blev varken model/brand → föll tillbaka till bred $text-sökning som matchade "Grolle" även på traktorer. Dessutom saknades moped-kategori.
+   - Fix (server.py): _key_tokens behandlar nu även normal-versaler (t[0].isupper(), len>=3) som brand-token. _CATEGORY_GROUPS utökad med moped-familjen (moped/flakmoped/mopedbil/vespa/scooter→"moped"), mc, cykel, atv, snöskoter.
+   - Resultat (verifierat): "Flakmoped Grolle" → kategori "moped", brand {flakmoped,grolle}; Grolle-traktor EXKLUDERAS (kategori moped≠traktor); äkta Grolle-flakmoped matchar; lastbilar (SCANIA R730, model-kod) opåverkade.
+   - OBS: äkta e2e-bekräftelse sker när användaren kör AI-granskning på ett mopedobjekt.

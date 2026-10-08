@@ -160,7 +160,7 @@ def _key_tokens(title: str):
             model.append(tl)
         elif has_digit:
             weak.append(tl)
-        elif t.isupper():
+        elif t.isupper() or (t[0].isupper() and len(t) >= 3):
             brand.append(tl)
     return model, brand, weak
 
@@ -193,6 +193,14 @@ _CATEGORY_GROUPS = {
     # boats, buses, RVs
     "båt": "bat", "motorbåt": "bat", "segelbåt": "bat", "jolle": "bat",
     "buss": "buss", "minibuss": "buss", "husbil": "husbil",
+    # mopeds / motorcycles / small vehicles — a "Flakmoped" must NOT be matched
+    # with a "Traktor" just because both share a rare brand word (e.g. Grolle).
+    "moped": "moped", "flakmoped": "moped", "mopedbil": "moped",
+    "mopedbilar": "moped", "vespa": "moped", "scooter": "moped",
+    "motorcykel": "mc", "mc": "mc", "motorcyklar": "mc", "crosshoj": "mc",
+    "cykel": "cykel", "elcykel": "cykel", "cyklar": "cykel",
+    "fyrhjuling": "atv", "atv": "atv", "fyrhjulingar": "atv",
+    "snöskoter": "snoskoter", "skoter": "snoskoter", "snöskotrar": "snoskoter",
     # toys / scale models / collectibles — so a real "veteranbil" is NOT matched
     # with a toy "modellbil" from Auctionet (wildly different price levels).
     "modellbil": "leksak", "modellbilar": "leksak", "modellfordon": "leksak",

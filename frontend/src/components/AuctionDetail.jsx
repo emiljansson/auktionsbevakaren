@@ -77,7 +77,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto border-slate-800 bg-[#0B0F19] text-slate-100 sm:max-w-3xl" data-testid="auction-detail-modal">
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-1.5rem)] overflow-y-auto overflow-x-hidden border-slate-800 bg-[#0B0F19] p-4 text-slate-100 sm:max-w-3xl sm:p-6" data-testid="auction-detail-modal">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Badge className={`border font-mono text-[11px] ${badgeClass(auction.source)}`}>{auction.source}</Badge>
