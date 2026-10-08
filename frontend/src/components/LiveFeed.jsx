@@ -218,7 +218,7 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (resnap(), setPage(1), load())}
-            placeholder="Sök i live-flödet (t.ex. grävmaskin, traktor)..." data-testid="live-search"
+            placeholder='Sök (t.ex. traktor) – använd "citattecken" för exakt träff' data-testid="live-search"
             className="border-slate-700 bg-slate-900 pl-9 text-slate-100 placeholder:text-slate-600" />
         </div>
         <Select value={source} onValueChange={setSource}>

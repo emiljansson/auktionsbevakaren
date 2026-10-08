@@ -763,48 +763,44 @@ async def live_status():
 async def live_auctions(request: Request, source: Optional[str] = None, q: Optional[str] = None, page: int = 1, page_size: int = 100, snapshot: Optional[str] = None):
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
-    # On search, augment the feed with live Tradera + Blocket results (not background-crawled).
-    if q and len((q or "").strip()) >= 2:
+    # Exact mode: wrapping the query in quotes ("Super cub" / ”Super cub”) returns
+    # ONLY items whose TITLE contains that exact phrase — the loose on-demand
+    # matches (Tradera/Blocket/Auctionet own fuzzy results) are excluded.
+    raw = (q or "").strip()
+    exact = len(raw) >= 2 and raw[0] in '"\u201c\u201d\u201e\u00ab' and raw[-1] in '"\u201c\u201d\u00bb'
+    phrase = raw[1:-1].strip() if exact else raw
+    # On search, augment the feed with live Tradera + Blocket + Auctionet results.
+    if phrase and len(phrase) >= 2:
         _rate_limit(request, "search", 15, 20)  # block burst searches, keep normal polling free
-        key = q.strip().lower()[:100]
-        if time.time() - _tradera_seen.get(key, 0) > 120:
-            try:
-                for it in await tradera.search(q):
-                    it["search_q"] = key
-                    await crawler._upsert(it)
-                _tradera_seen[key] = time.time()
-            except Exception:
-                logger.exception("Tradera augment failed")
-        if time.time() - _blocket_seen.get(key, 0) > 120:
-            try:
-                for it in await blocket.search(q):
-                    it["search_q"] = key
-                    await crawler._upsert(it)
-                _blocket_seen[key] = time.time()
-            except Exception:
-                logger.exception("Blocket augment failed")
-        if time.time() - _auctionet_seen.get(key, 0) > 120:
-            try:
-                for it in await auctionet.search(q):
-                    it["search_q"] = key
-                    await crawler._upsert(it)
-                _auctionet_seen[key] = time.time()
-            except Exception:
-                logger.exception("Auctionet augment failed")
+        key = phrase.lower()[:100]
+        for name, mod, seen in (("Tradera", tradera, _tradera_seen),
+                                 ("Blocket", blocket, _blocket_seen),
+                                 ("Auctionet", auctionet, _auctionet_seen)):
+            if time.time() - seen.get(key, 0) > 120:
+                try:
+                    for it in await mod.search(phrase):
+                        it["search_q"] = key
+                        await crawler._upsert(it)
+                    seen[key] = time.time()
+                except Exception:
+                    logger.exception("%s augment failed", name)
     query = {}
     if source and source != "Alla":
         query["source"] = source
-    elif not q:
+    elif not phrase:
         query["source"] = {"$nin": ["Tradera", "Blocket", "Auctionet"]}  # on-demand sources only appear on search
-    if q:
-        key = q.strip().lower()[:100]
-        # Match on title OR items specifically fetched for this search (Tradera/Blocket
-        # titles don't always contain the query term, e.g. "Yamaha" for "moped").
+    if phrase:
+        key = phrase.lower()[:100]
         # re.escape prevents ReDoS / regex injection via the user query.
-        query["$or"] = [
-            {"title": {"$regex": re.escape(q.strip()[:100]), "$options": "i"}},
-            {"search_q": key},
-        ]
+        title_clause = {"title": {"$regex": re.escape(phrase[:100]), "$options": "i"}}
+        if exact:
+            # Exact phrase: match the title only (no loose search_q bucket).
+            query.update(title_clause)
+        else:
+            # Broad: title contains the term OR the item was fetched for this exact
+            # search (Tradera/Blocket titles don't always contain the query term,
+            # e.g. "Yamaha" for "moped").
+            query["$or"] = [title_clause, {"search_q": key}]
     docs = await db.live_auctions.find(query, {"_id": 0}).sort("ends_at", 1).to_list(30000)
     now = datetime.now(timezone.utc)
     far = datetime.max.replace(tzinfo=timezone.utc)
