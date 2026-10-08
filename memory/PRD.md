@@ -422,3 +422,10 @@ Slutsats: alla källor som KAN ha budbevakning+nedräkning fungerar. Inga kodän
   - tester: tog bort "Kronofogden" ur förväntade källistor i alla testfiler.
   - DB: inga Kronofogden-dokument fanns (0 i live_auctions/auctions/sold_items).
 - Verifierat: grep i backend/*.py + frontend/src → inga träffar; `import adapters, scraper` OK; backend running; frontend renderar utan "Kronofogden" i sidtexten; "Övervakar 12 källor" oförändrat (Kronofogden ingick ej i räkningen).
+
+## 2026-10-07 — FIX: Miljöspärr för push (dubbla/parallella notiser från preview+produktion)
+- Symptom: användaren fick både "slutar inom 10 minuter" OCH "slutar inom 1 minut" samtidigt. Orsak: preview- OCH produktions-backend kör var sin notifier mot var sin DB; idempotensen (push_events) dedupar bara inom en DB, ej tvärs miljöer.
+- Fix: ny env-flagga PUSH_SEND_ENABLED. commhub.send_to_token no-op:ar (returnerar {skipped:true}) om flaggan inte är true. Nya helpern commhub.send_enabled() = enabled() AND PUSH_SEND_ENABLED. Notifier- och keyword-looparna gatear nu på send_enabled() (markerar inte heller notiser som skickade i preview). enabled() (registrering/web-config) lämnas öppet i alla miljöer.
+- Default: AV (säkrast). backend/.env (preview) satt till PUSH_SEND_ENABLED=false. 
+- KRÄVS I PRODUKTION: sätt PUSH_SEND_ENABLED=true i produktionens secrets, annars skickas inga pushar i produktion heller.
+- Verifierat (preview): enabled=True, SEND_ENABLED=False, send_to_token→{skipped,push_send_disabled}; backend running.

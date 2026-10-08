@@ -1227,7 +1227,7 @@ async def _watch_notifier():
     order = ["60", "10", "1"]
     while True:
         try:
-            if commhub.enabled():
+            if commhub.send_enabled():
                 now = datetime.now(timezone.utc)
                 seen = set()  # (token, url) already handled this pass
                 async for a in db.auctions.find({"device_id": {"$ne": None}}):
@@ -1323,7 +1323,7 @@ async def _run_keyword_check(w, now):
         update["unseen_count"] = (w.get("unseen_count", 0) or 0) + len(new)
         dev = await db.devices.find_one({"device_id": w["device_id"]})
         token = (dev or {}).get("token")
-        if token and commhub.enabled():
+        if token and commhub.send_enabled():
             n = len(new)
             body = f"{n} ny{'a' if n != 1 else ''} produkt{'er' if n != 1 else ''} i auktionssystemen"
             sig = hashlib.sha1("|".join(sorted(new)).encode()).hexdigest()[:16]
