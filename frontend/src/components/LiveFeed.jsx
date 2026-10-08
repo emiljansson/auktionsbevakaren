@@ -109,6 +109,7 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
   const [loading, setLoading] = useState(true);
   const [watching, setWatching] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -152,6 +153,17 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
   useEffect(() => { load(); }, [source, page, load]);
   // Jump back to the top when the user changes page so they don't lose their place.
   useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [page]);
+
+  // Trigger a search: freeze a new snapshot, jump to page 1 and show the "searching
+  // all sites" animation while the on-demand sources (Tradera/Blocket/Auctionet) are
+  // fetched server-side (can take several seconds).
+  const runSearch = async () => {
+    resnap();
+    pageRef.current = 1;
+    setPage(1);
+    setSearching(true);
+    try { await load(); } finally { setSearching(false); }
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -217,10 +229,15 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (resnap(), setPage(1), load())}
+          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runSearch()}
             placeholder='Sök (t.ex. traktor) – använd "citattecken" för exakt träff' data-testid="live-search"
             className="border-slate-700 bg-slate-900 pl-9 text-slate-100 placeholder:text-slate-600" />
         </div>
+        <Button onClick={runSearch} disabled={searching} data-testid="live-search-button"
+          className="bg-amber-500 font-semibold text-slate-950 hover:bg-amber-400">
+          {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          <span className="ml-1.5 hidden sm:inline">{searching ? "Söker…" : "Sök"}</span>
+        </Button>
         <Select value={source} onValueChange={setSource}>
           <SelectTrigger data-testid="live-source-filter" className="w-44 border-slate-700 bg-slate-900 text-slate-100"><SelectValue /></SelectTrigger>
           <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
@@ -230,6 +247,20 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
         </Select>
         <Button variant="outline" onClick={() => { resnap(); setPage(1); load(); }} title="Uppdatera flödet" className="border-slate-700 text-slate-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" /></Button>
       </div>
+
+      {searching && (
+        <div data-testid="search-loading" className="mb-4 flex items-center justify-center gap-3 rounded-xl border border-violet-500/30 bg-violet-500/10 py-4 text-sm font-medium text-violet-200">
+          <Loader2 className="h-5 w-5 animate-spin text-violet-300" />
+          <span className="flex items-center">
+            Söker igenom alla auktionssajter
+            <span className="ml-1 inline-flex">
+              <span className="animate-bounce [animation-delay:-0.3s]">.</span>
+              <span className="animate-bounce [animation-delay:-0.15s]">.</span>
+              <span className="animate-bounce">.</span>
+            </span>
+          </span>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex h-48 items-center justify-center text-slate-500"><Loader2 className="h-6 w-6 animate-spin" /></div>

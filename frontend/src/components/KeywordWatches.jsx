@@ -135,6 +135,19 @@ export const KeywordWatches = ({ onWatchAdded, onOpen, onUnseenChange }) => {
             Bevaka
           </Button>
         </div>
+        {adding && (
+          <div data-testid="kw-search-loading" className="mt-3 flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-medium text-violet-200">
+            <Loader2 className="h-4 w-4 animate-spin text-violet-300" />
+            <span className="flex items-center">
+              Söker igenom alla auktionssajter
+              <span className="ml-1 inline-flex">
+                <span className="animate-bounce [animation-delay:-0.3s]">.</span>
+                <span className="animate-bounce [animation-delay:-0.15s]">.</span>
+                <span className="animate-bounce">.</span>
+              </span>
+            </span>
+          </div>
+        )}
         {locked && (
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-400/80">
             <BellRing className="h-3.5 w-3.5" /> Installera appen och aktivera notiser för att kunna sökbevaka.

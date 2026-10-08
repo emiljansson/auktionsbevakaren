@@ -438,3 +438,9 @@ Slutsats: alla källor som KAN ha budbevakning+nedräkning fungerar. Inga kodän
    - Fix (server.py): _key_tokens behandlar nu även normal-versaler (t[0].isupper(), len>=3) som brand-token. _CATEGORY_GROUPS utökad med moped-familjen (moped/flakmoped/mopedbil/vespa/scooter→"moped"), mc, cykel, atv, snöskoter.
    - Resultat (verifierat): "Flakmoped Grolle" → kategori "moped", brand {flakmoped,grolle}; Grolle-traktor EXKLUDERAS (kategori moped≠traktor); äkta Grolle-flakmoped matchar; lastbilar (SCANIA R730, model-kod) opåverkade.
    - OBS: äkta e2e-bekräftelse sker när användaren kör AI-granskning på ett mopedobjekt.
+
+## 2026-10-08 — FEATURE: Sökknapp + sök-animation
+- LiveFeed.jsx: la till en "Sök"-knapp (data-testid live-search-button) bredvid sökrutan (tidigare bara Enter). Ny `searching`-state + `runSearch()` (resnap + sida 1 + await load). Knappen visar spinner + "Söker…" under sökning.
+- Sök-animation: lila banner "Söker igenom alla auktionssajter…" med spinner + studsande punkter ovanför rutnätet medan on-demand-källorna (Tradera/Blocket/Auctionet) hämtas (tar några sekunder). data-testid search-loading.
+- KeywordWatches.jsx: samma banner (data-testid kw-search-loading) när en sökbevakning skapas (baseline går också igenom alla siter).
+- Verifierat i UI (mobil): knapp synlig, animation visas under sökning och försvinner när svaret kommer.
