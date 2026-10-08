@@ -29,6 +29,7 @@ export const api = {
   liveAnalyze: (url) => axios.post(`${API}/live/analyze`, { url }).then((r) => r.data),
   deleteSoldItem: (comp) => axios.delete(`${API}/sold-items`, { data: typeof comp === "string" ? { url: comp } : comp }).then((r) => r.data),
   pushStatus: () => axios.get(`${API}/push/status`).then((r) => r.data),
+  pushTest: () => axios.post(`${API}/push/test`).then((r) => r.data),
   getAccountName: () => axios.get(`${API}/account/name`).then((r) => r.data),
   setAccountName: (name, pin) => axios.post(`${API}/account/name`, { name, pin: pin || null }).then((r) => r.data),
   restoreByName: (name, pin) => axios.post(`${API}/account/restore`, { name, pin: pin || null }).then((r) => r.data),

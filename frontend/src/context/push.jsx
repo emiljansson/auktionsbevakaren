@@ -15,6 +15,7 @@ export const PushProvider = ({ children }) => {
   const [deferred, setDeferred] = useState(null);
   const [gateOpen, setGateOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     initMessaging((payload) => {
@@ -61,6 +62,20 @@ export const PushProvider = ({ children }) => {
       toast.error("Kunde inte aktivera notiser.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const res = await api.pushTest();
+      if (res?.sent) toast.success("Testnotis skickad – kolla din enhet");
+      else if (res?.reason === "disabled") toast.warning("Push-sändning är avstängd i denna miljö");
+      else toast.error("Kunde inte skicka testnotis.");
+    } catch {
+      toast.error("Kunde inte skicka testnotis.");
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -113,7 +128,11 @@ export const PushProvider = ({ children }) => {
 
           {canWatch && (
             <div className="rounded-lg border border-emerald-700/40 bg-emerald-500/10 p-3 text-sm text-emerald-300">
-              Klart! Du kan nu bevaka auktioner på den här enheten.
+              <p>Klart! Du kan nu bevaka auktioner på den här enheten.</p>
+              <Button onClick={handleTest} disabled={testing} variant="outline" data-testid="send-test-push-btn"
+                className="mt-3 w-full border-emerald-600/40 bg-transparent text-emerald-200 hover:bg-emerald-500/10">
+                {testing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Bell className="mr-1.5 h-4 w-4" />} Skicka testnotis
+              </Button>
             </div>
           )}
         </DialogContent>

@@ -373,6 +373,27 @@ async def push_status(x_device_id: Optional[str] = Header(None)):
     return {"registered": bool(dev and dev.get("token"))}
 
 
+@api_router.post("/push/test")
+async def push_test(request: Request, device_id: str = Depends(require_device)):
+    _rate_limit(request, "push_test", 10, 60)
+    dev = await db.devices.find_one({"device_id": device_id})
+    token = (dev or {}).get("token")
+    if not token:
+        raise HTTPException(status_code=400, detail="Aktivera notiser först.")
+    if not commhub.send_enabled():
+        return {"sent": False, "reason": "disabled",
+                "detail": "Push-sändning är avstängd i denna miljö (PUSH_SEND_ENABLED är inte satt till true)."}
+    try:
+        await commhub.send_to_token(
+            token, title="✅ Testnotis",
+            body="Push fungerar! Detta är ett test från Auktiomera.",
+            data={"type": "test"})
+    except Exception:
+        logger.exception("push test")
+        raise HTTPException(status_code=502, detail="Kunde inte skicka testnotis.")
+    return {"sent": True}
+
+
 @api_router.get("/account/name")
 async def get_account_name(x_device_id: Optional[str] = Header(None)):
     dev = await db.devices.find_one({"device_id": x_device_id}) if x_device_id else None
