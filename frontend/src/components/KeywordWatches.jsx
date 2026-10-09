@@ -120,7 +120,7 @@ export const KeywordWatches = ({ onWatchAdded, onOpen, onUnseenChange }) => {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-              placeholder="Skriv ett sökord att bevaka…"
+              placeholder='Sökord att bevaka – "citattecken" för exakt träff'
               data-testid="keyword-watch-input"
               className="border-slate-700 bg-slate-900 pl-9 text-slate-100"
             />

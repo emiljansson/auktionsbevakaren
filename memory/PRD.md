@@ -446,3 +446,5 @@ Slutsats: alla källor som KAN ha budbevakning+nedräkning fungerar. Inga kodän
 - Verifierat i UI (mobil): knapp synlig, animation visas under sökning och försvinner när svaret kommer.
 
 - 2026-06: Fixed AI-modal horizontal overflow on mobile (min-w-0 on grid children, smaller mobile font sizes, 2-col stats, wrapping headers). Verified at 390px.
+
+- 2026-06: Quoted phrases ("crescent sport") now enforce exact title match in BOTH live search and keyword watches; extra words outside quotes allowed. Existing wrong matches pruned when watch is opened. Helpers _parse_query/_match_clause/_title_ok in server.py.

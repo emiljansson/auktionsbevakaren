@@ -759,16 +759,38 @@ async def live_status():
     return s
 
 
+_QUOTES = '"\u201c\u201d\u201e\u00ab\u00bb'
+_QUOTED_RE = re.compile(f"[{_QUOTES}]([^{_QUOTES}]+)[{_QUOTES}]")
+
+
+def _parse_query(raw: Optional[str]):
+    """Return (search text without quotes, list of quoted phrases that must appear exactly in the title)."""
+    raw = (raw or "").strip()
+    phrases = [p.strip() for p in _QUOTED_RE.findall(raw) if len(p.strip()) >= 2]
+    text = re.sub(f"[{_QUOTES}]", "", raw)
+    return re.sub(r"\s+", " ", text).strip()[:100], phrases
+
+
+def _match_clause(text: str, phrases: list) -> dict:
+    # Quoted phrases: title must contain every phrase (extra words around it are fine).
+    # re.escape prevents ReDoS / regex injection via the user query.
+    if phrases:
+        return {"$and": [{"title": {"$regex": re.escape(p[:100]), "$options": "i"}} for p in phrases]}
+    # Broad: title contains the term OR the item was fetched for this search
+    # (Tradera/Blocket titles don't always contain the query term).
+    return {"$or": [{"title": {"$regex": re.escape(text), "$options": "i"}}, {"search_q": text.lower()}]}
+
+
+def _title_ok(title: str, phrases: list) -> bool:
+    t = (title or "").lower()
+    return all(p.lower() in t for p in phrases)
+
+
 @api_router.get("/live/auctions")
 async def live_auctions(request: Request, source: Optional[str] = None, q: Optional[str] = None, page: int = 1, page_size: int = 100, snapshot: Optional[str] = None):
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
-    # Exact mode: wrapping the query in quotes ("Super cub" / ”Super cub”) returns
-    # ONLY items whose TITLE contains that exact phrase — the loose on-demand
-    # matches (Tradera/Blocket/Auctionet own fuzzy results) are excluded.
-    raw = (q or "").strip()
-    exact = len(raw) >= 2 and raw[0] in '"\u201c\u201d\u201e\u00ab' and raw[-1] in '"\u201c\u201d\u00bb'
-    phrase = raw[1:-1].strip() if exact else raw
+    phrase, exact_phrases = _parse_query(q)
     # On search, augment the feed with live Tradera + Blocket + Auctionet results.
     if phrase and len(phrase) >= 2:
         _rate_limit(request, "search", 15, 20)  # block burst searches, keep normal polling free
@@ -790,17 +812,7 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
     elif not phrase:
         query["source"] = {"$nin": ["Tradera", "Blocket", "Auctionet"]}  # on-demand sources only appear on search
     if phrase:
-        key = phrase.lower()[:100]
-        # re.escape prevents ReDoS / regex injection via the user query.
-        title_clause = {"title": {"$regex": re.escape(phrase[:100]), "$options": "i"}}
-        if exact:
-            # Exact phrase: match the title only (no loose search_q bucket).
-            query.update(title_clause)
-        else:
-            # Broad: title contains the term OR the item was fetched for this exact
-            # search (Tradera/Blocket titles don't always contain the query term,
-            # e.g. "Yamaha" for "moped").
-            query["$or"] = [title_clause, {"search_q": key}]
+        query.update(_match_clause(phrase, exact_phrases))
     docs = await db.live_auctions.find(query, {"_id": 0}).sort("ends_at", 1).to_list(30000)
     now = datetime.now(timezone.utc)
     far = datetime.max.replace(tzinfo=timezone.utc)
@@ -932,16 +944,15 @@ async def _keyword_matches(keyword: str) -> list:
     """All matching live items across ALL sources for `keyword`: refresh the
     on-demand sources (Tradera/Blocket/Auctionet) live, then match the DB on
     title or the search tag. Returns a list of matching URLs."""
-    key = keyword.strip().lower()[:100]
+    text, phrases = _parse_query(keyword)
     for mod in (tradera, blocket, auctionet):
         try:
-            for it in await mod.search(keyword):
-                it["search_q"] = key
+            for it in await mod.search(text):
+                it["search_q"] = text.lower()
                 await crawler._upsert(it)
         except Exception:
             logger.exception("keyword live search failed (%s)", getattr(mod, "__name__", "?"))
-    regex = re.escape(keyword.strip()[:100])
-    query = {"$or": [{"title": {"$regex": regex, "$options": "i"}}, {"search_q": key}]}
+    query = _match_clause(text, phrases)
     docs = await db.live_auctions.find(query, {"_id": 0, "url": 1}).to_list(5000)
     return [d["url"] for d in docs]
 
@@ -992,14 +1003,22 @@ async def get_keyword_watch(wid: str, device_id: str = Depends(require_device)):
         # drop off on their own and the list stays short — promote an item to a real
         # price-watch ("Bevaka") to keep it.
         found = {}
+        phrases = _parse_query(w["keyword"])[1]
+        bad = set()
         async for d in db.live_auctions.find({"url": {"$in": urls}}, {"_id": 0}):
-            found[d["url"]] = d
+            if _title_ok(d.get("title"), phrases):
+                found[d["url"]] = d
+            else:
+                bad.add(d["url"])
         for m in reversed(matches):  # newest found first
             d = found.get(m["url"])
             if d:
                 d["found_at"] = m["found_at"]
                 items.append(d)
-    await db.keyword_watches.update_one({"id": wid}, {"$set": {"unseen_count": 0}})
+    upd = {"unseen_count": 0}
+    if urls and bad:
+        upd["matches"] = [m for m in matches if m["url"] not in bad]
+    await db.keyword_watches.update_one({"id": wid}, {"$set": upd})
     return {"id": w["id"], "keyword": w["keyword"], "created_at": w["created_at"],
             "last_check": w.get("last_check"), "items": items}
 
