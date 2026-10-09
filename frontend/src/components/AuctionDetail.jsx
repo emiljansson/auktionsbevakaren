@@ -28,9 +28,9 @@ const ChartTooltip = ({ active, payload }) => {
 };
 
 const Metric = ({ label, value, accent }) => (
-  <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
-    <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">{label}</p>
-    <p className={`font-heading text-lg font-bold ${accent || "text-slate-100"}`}>{value}</p>
+  <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/50 p-2.5 sm:p-3">
+    <p className="break-words text-[10px] font-mono uppercase tracking-wider text-slate-500">{label}</p>
+    <p className={`break-words font-heading text-base font-bold sm:text-lg ${accent || "text-slate-100"}`}>{value}</p>
   </div>
 );
 
@@ -77,27 +77,27 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] w-[calc(100%-1.5rem)] overflow-y-auto overflow-x-hidden border-slate-800 bg-[#0B0F19] p-4 text-slate-100 sm:max-w-3xl sm:p-6" data-testid="auction-detail-modal">
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-1.5rem)] overflow-y-auto overflow-x-hidden border-slate-800 [&>*]:min-w-0 bg-[#0B0F19] p-4 text-slate-100 sm:max-w-3xl sm:p-6" data-testid="auction-detail-modal">
         <DialogHeader>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge className={`border font-mono text-[11px] ${badgeClass(auction.source)}`}>{auction.source}</Badge>
             {tl && <span className="flex items-center gap-1 text-xs text-slate-400"><Clock className="h-3 w-3" /> {tl.label}</span>}
             {!auction.scraped && <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400">simulerad data</span>}
           </div>
-          <DialogTitle className="font-heading text-xl">{auction.title}</DialogTitle>
+          <DialogTitle className="break-words pr-6 font-heading text-lg sm:text-xl">{auction.title}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-4 sm:grid-cols-5">
-          <div className="sm:col-span-2">
+        <div className="grid min-w-0 gap-4 sm:grid-cols-5">
+          <div className="min-w-0 sm:col-span-2">
             <img src={auction.image} alt={auction.title} className="h-48 w-full rounded-xl object-cover sm:h-full" />
           </div>
-          <div className="sm:col-span-3 grid grid-cols-2 gap-3">
+          <div className="grid min-w-0 grid-cols-2 gap-2 sm:col-span-3 sm:gap-3">
             <Metric label={tl?.ended && auction.current_bid > 0 ? "Slutpris" : "Nuvarande bud"} value={formatSEK(auction.current_bid)} accent="text-amber-400" />
             <Metric label="Antal bud" value={`${auction.bid_count} st`} />
             {soldSummary?.count > 0 && (
               <div className="col-span-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3" data-testid="sold-median-inline">
                 <p className="text-[10px] font-mono uppercase tracking-wider text-emerald-400/80">Median slutpris · exakt modell</p>
-                <div className="flex items-baseline gap-2">
+                <div className="flex flex-wrap items-baseline gap-x-2">
                   <p className="font-heading text-lg font-bold text-emerald-300">{formatSEK(soldSummary.median_final)}</p>
                   <span className="text-[11px] text-slate-400">{soldSummary.count} sålda · {formatSEK(soldSummary.min_final)}–{formatSEK(soldSummary.max_final)}</span>
                 </div>
@@ -106,7 +106,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
             <Metric label={`Totalpris ${vatIncl ? "inkl." : "exkl."} moms`} value={formatSEK(bidPriceDisplay)} />
             <Metric label="Slagavgift (exkl. moms)" value={auction.fee_known ? formatSEK(auction.buyer_fee_excl ?? Math.round((auction.buyer_fee || 0) / 1.25)) : "Tillkommer"} />
             <div className="col-span-2 rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-slate-400">Moms {auction.vat}% · Visa totalpris</span>
                 <Button size="sm" variant="outline" onClick={() => setVatIncl(!vatIncl)} data-testid="toggle-vat" className="h-7 border-slate-700 text-slate-300 hover:bg-slate-800">
                   {vatIncl ? "Inkl. moms" : "Exkl. moms"}
@@ -118,8 +118,8 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
         </div>
 
         {/* Bid history */}
-        <div className="mt-2 rounded-xl border border-slate-800 bg-[#111827] p-4" data-testid="bid-history-chart">
-          <div className="mb-3 flex items-center justify-between">
+        <div className="mt-2 min-w-0 rounded-xl border border-slate-800 bg-[#111827] p-3 sm:p-4" data-testid="bid-history-chart">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h4 className="font-heading font-semibold text-slate-100 flex items-center gap-2"><Gavel className="h-4 w-4 text-amber-400" /> Budhistorik</h4>
             <Button size="sm" variant="outline" onClick={() => onRefresh(auction)} disabled={refreshing} data-testid="refresh-auction" className="h-8 border-slate-700 text-slate-300 hover:bg-slate-800">
               {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -155,7 +155,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
             </ResponsiveContainer>
             )}
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-3">
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
             <Metric label="Högsta bud" value={formatSEK(highest)} accent="text-amber-400" />
             <Metric label="Antal bud" value={`${auction.bid_count}`} />
             <Metric label="Est. slutpris" value={val ? formatSEK(val.used_price_estimate) : "—"} accent="text-violet-300" />
@@ -163,8 +163,8 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
         </div>
 
         {/* AI valuation */}
-        <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4">
-          <div className="mb-3 flex items-center justify-between">
+        <div className="min-w-0 rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 sm:p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h4 className="flex items-center gap-2 font-heading font-semibold text-violet-200">
               <Sparkles className="h-4 w-4" /> AI-prisanalys
             </h4>
@@ -183,19 +183,19 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                   ✓ Baserad på verkliga auktionsslutpriser
                 </Badge>
               )}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Uppskattat nypris</p>
-                  <p className="font-heading text-2xl font-bold text-slate-100">{formatSEK(val.new_price_estimate)}</p>
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/50 p-2.5 sm:p-3">
+                  <p className="break-words text-[10px] font-mono uppercase tracking-wider text-slate-500">Uppskattat nypris</p>
+                  <p className="break-words font-heading text-lg font-bold text-slate-100 sm:text-2xl">{formatSEK(val.new_price_estimate)}</p>
                 </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Uppskattat begagnatpris</p>
-                  <p className="font-heading text-2xl font-bold text-violet-300">{formatSEK(val.used_price_estimate)}</p>
+                <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/50 p-2.5 sm:p-3">
+                  <p className="break-words text-[10px] font-mono uppercase tracking-wider text-slate-500">Uppskattat begagnatpris</p>
+                  <p className="break-words font-heading text-lg font-bold text-violet-300 sm:text-2xl">{formatSEK(val.used_price_estimate)}</p>
                 </div>
               </div>
 
               {pm && (
-                <div className={`flex items-center gap-2 text-sm font-semibold ${pm.cls}`}>
+                <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold ${pm.cls}`}>
                   <pm.icon className="h-4 w-4" /> {pm.label}
                   {typeof val.savings_pct === "number" && <span className="text-slate-400 font-normal">· {val.savings_pct > 0 ? `${val.savings_pct}% under` : `${Math.abs(val.savings_pct)}% över`} marknad</span>}
                 </div>
@@ -208,7 +208,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                 <Progress value={val.confidence} className="h-2 bg-slate-800" />
               </div>
 
-              <p className="rounded-lg bg-slate-900/60 p-3 text-sm italic text-slate-300">"{val.insight}"</p>
+              <p className="break-words rounded-lg bg-slate-900/60 p-3 text-sm italic text-slate-300">"{val.insight}"</p>
 
               {comps.length > 0 && (
                 <div data-testid="sold-comparables">
@@ -217,7 +217,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                   </p>
                   <div className="space-y-2">
                     {comps.map((c) => (
-                      <div key={c.url || c.title} className="flex items-center justify-between gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm">
+                      <div key={c.url || c.title} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-2 text-sm sm:px-3">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-slate-200">{c.title}</p>
                           <span className="text-[11px] text-slate-500">
@@ -225,7 +225,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                             {c.ends_at ? ` · ${new Date(c.ends_at).toLocaleDateString("sv-SE", { day: "2-digit", month: "short", year: "2-digit" })}` : ""}
                           </span>
                         </div>
-                        <span className="font-semibold text-emerald-300">{formatSEK(c.final_bid)}</span>
+                        <span className="shrink-0 whitespace-nowrap font-semibold text-emerald-300">{formatSEK(c.final_bid)}</span>
                         <button
                           onClick={() => handleRemoveComp(c)}
                           disabled={removing === (c.url || c.title)}
@@ -246,12 +246,12 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                   <p className="mb-2 text-[11px] font-mono uppercase tracking-wider text-slate-500">Jämförbara produkter</p>
                   <div className="space-y-2">
                     {val.comparables.map((c, i) => (
-                      <div key={i} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm">
+                      <div key={i} className="flex min-w-0 items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 px-2.5 py-2 text-sm sm:px-3">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-slate-200">{c.name}</p>
                           <span className="text-[11px] text-slate-500">{c.source} · {c.condition}</span>
                         </div>
-                        <span className="ml-3 font-semibold text-slate-100">{formatSEK(c.price)}</span>
+                        <span className="ml-3 shrink-0 whitespace-nowrap font-semibold text-slate-100">{formatSEK(c.price)}</span>
                       </div>
                     ))}
                   </div>

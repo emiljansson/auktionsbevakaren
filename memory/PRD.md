@@ -444,3 +444,5 @@ Slutsats: alla källor som KAN ha budbevakning+nedräkning fungerar. Inga kodän
 - Sök-animation: lila banner "Söker igenom alla auktionssajter…" med spinner + studsande punkter ovanför rutnätet medan on-demand-källorna (Tradera/Blocket/Auctionet) hämtas (tar några sekunder). data-testid search-loading.
 - KeywordWatches.jsx: samma banner (data-testid kw-search-loading) när en sökbevakning skapas (baseline går också igenom alla siter).
 - Verifierat i UI (mobil): knapp synlig, animation visas under sökning och försvinner när svaret kommer.
+
+- 2026-06: Fixed AI-modal horizontal overflow on mobile (min-w-0 on grid children, smaller mobile font sizes, 2-col stats, wrapping headers). Verified at 390px.
