@@ -448,3 +448,5 @@ Slutsats: alla källor som KAN ha budbevakning+nedräkning fungerar. Inga kodän
 - 2026-06: Fixed AI-modal horizontal overflow on mobile (min-w-0 on grid children, smaller mobile font sizes, 2-col stats, wrapping headers). Verified at 390px.
 
 - 2026-06: Quoted phrases ("crescent sport") now enforce exact title match in BOTH live search and keyword watches; extra words outside quotes allowed. Existing wrong matches pruned when watch is opened. Helpers _parse_query/_match_clause/_title_ok in server.py.
+
+- 2026-06: Push deep-links per push-spec: data.url (/?auction=<id>, /?kw=<id>, /?view=watch) in all pushes; SW rewritten (click handler before importScripts, FCM_MSG unwrap, pending-nav-v1 cache + postMessage/ACK + navigate fallback, skipWaiting/claim, telemetry cache sw-telemetry-v1); SW registered at boot with ?v=<bundle>-r<SW_REV> + updateViaCache none (bump SW_REV in src/lib/push.js on SW change); SwNavigationListener.jsx; foreground toast "Öppna" action; POST /api/push/diag + GET /api/push/diag/latest (device-scoped, db.push_diag).

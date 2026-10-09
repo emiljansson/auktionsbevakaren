@@ -17,7 +17,7 @@ const fmtWhen = (iso) => {
   }
 };
 
-export const KeywordWatches = ({ onWatchAdded, onOpen, onUnseenChange }) => {
+export const KeywordWatches = ({ onWatchAdded, onOpen, onUnseenChange, openId, onOpenedId }) => {
   const push = usePush();
   const locked = !push?.canWatch;
   const [watches, setWatches] = useState([]);
@@ -54,6 +54,16 @@ export const KeywordWatches = ({ onWatchAdded, onOpen, onUnseenChange }) => {
       setLoadingDetail(false);
     }
   };
+
+  useEffect(() => {
+    if (!openId || loading) return;
+    const w = watches.find((x) => x.id === openId);
+    if (w) {
+      openWatch(w).then(() => document.querySelector('[data-testid="keyword-watch-detail"]')?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    } else toast.error("Sökbevakningen hittades inte");
+    onOpenedId?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId, loading]);
 
   const handleAdd = async () => {
     const kw = keyword.trim();

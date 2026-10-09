@@ -20,7 +20,11 @@ export const PushProvider = ({ children }) => {
   useEffect(() => {
     initMessaging((payload) => {
       const n = payload?.notification || payload?.data || {};
-      if (n.title || n.body) toast(n.title || "Auktiomera", { description: n.body });
+      const url = payload?.data?.url;
+      if (n.title || n.body) toast(n.title || "Auktiomera", {
+        description: n.body,
+        action: url?.startsWith("/") ? { label: "Öppna", onClick: () => window.dispatchEvent(new CustomEvent("app-navigate", { detail: url })) } : undefined,
+      });
     });
     const onPrompt = (e) => { e.preventDefault(); setDeferred(e); };
     window.addEventListener("beforeinstallprompt", onPrompt);

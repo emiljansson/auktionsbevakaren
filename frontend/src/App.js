@@ -14,6 +14,7 @@ import { AccountNamePanel, RestoreByNamePanel } from "@/components/AccountTools"
 import { api } from "@/lib/api";
 import { SOURCES, formatSEK } from "@/lib/sources";
 import { PushProvider, usePush } from "@/context/push";
+import SwNavigationListener from "@/components/SwNavigationListener";
 
 const NotifButton = () => {
   const push = usePush();
@@ -56,6 +57,7 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("live");
   const [kwUnseen, setKwUnseen] = useState(0);
+  const [kwOpenId, setKwOpenId] = useState(null);
 
   useEffect(() => { document.documentElement.classList.add("dark"); }, []);
 
@@ -119,6 +121,28 @@ function App() {
   const openDetail = (a) => { setSelected(a); setDetailOpen(true); };
   const openLiveDetail = (a) => openDetail({ ...a, scraped: true });
 
+  const handleNavigate = useCallback(async (path) => {
+    const p = new URL(path, window.location.origin).searchParams;
+    window.history.replaceState(null, "", "/");
+    const auctionId = p.get("auction");
+    const kwId = p.get("kw");
+    if (auctionId) {
+      setView("watch");
+      try {
+        const a = await api.getAuction(auctionId);
+        setSelected(a);
+        setDetailOpen(true);
+      } catch {
+        toast.error("Objektet hittades inte bland dina bevakningar");
+      }
+    } else if (kwId) {
+      setView("search");
+      setKwOpenId(kwId);
+    } else if (["live", "search", "watch"].includes(p.get("view"))) {
+      setView(p.get("view"));
+    }
+  }, []);
+
   const handleAnalyze = async (a) => {
     setAnalyzing(true);
     try {
@@ -157,6 +181,7 @@ function App() {
   return (
     <div className="App min-h-screen bg-[#0B0F19] text-slate-100">
       <Toaster theme="dark" position="top-right" richColors />
+      <SwNavigationListener onNavigate={handleNavigate} />
 
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
@@ -212,7 +237,7 @@ function App() {
         {view === "live" ? (
           <LiveFeed onWatchAdded={load} onOpen={openLiveDetail} />
         ) : view === "search" ? (
-          <KeywordWatches onWatchAdded={load} onOpen={openLiveDetail} onUnseenChange={loadKwUnseen} />
+          <KeywordWatches onWatchAdded={load} onOpen={openLiveDetail} onUnseenChange={loadKwUnseen} openId={kwOpenId} onOpenedId={() => setKwOpenId(null)} />
         ) : (
         <>
         {/* Stats */}

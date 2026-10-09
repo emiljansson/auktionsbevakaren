@@ -395,11 +395,31 @@ async def push_test(request: Request, device_id: str = Depends(require_device)):
         await commhub.send_to_token(
             token, title="✅ Testnotis",
             body="Push fungerar! Detta är ett test från Auktiomera.",
-            data={"type": "test"})
+            data={"type": "test", "event_id": str(uuid.uuid4()), "url": "/?view=watch"})
     except Exception:
         logger.exception("push test")
         raise HTTPException(status_code=502, detail="Kunde inte skicka testnotis.")
     return {"sent": True}
+
+
+class PushDiagIn(BaseModel):
+    logs: List[dict]
+
+
+@api_router.post("/push/diag")
+async def push_diag(payload: PushDiagIn, request: Request, device_id: str = Depends(require_device)):
+    _rate_limit(request, "push_diag", 30, 60)
+    logs = payload.logs[:100]
+    if logs:
+        await db.push_diag.insert_one({"device_id": device_id, "created_at": datetime.now(timezone.utc).isoformat(),
+                                       "logs": logs})
+    return {"ok": True, "stored": len(logs)}
+
+
+@api_router.get("/push/diag/latest")
+async def push_diag_latest(limit: int = 20, device_id: str = Depends(require_device)):
+    docs = await db.push_diag.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(max(1, min(limit, 100)))
+    return {"device_id": device_id, "entries": docs}
 
 
 @api_router.get("/account/name")
@@ -1291,7 +1311,8 @@ async def _watch_notifier():
                         lv = a
                     changes = {}
                     title = (lv.get("title") or a.get("title") or "Objekt")[:70]
-                    data = {"url": a.get("url") or ""}
+                    data = {"type": "auction", "auction_id": a.get("id") or "",
+                            "url": f"/?auction={a.get('id')}", "source_url": a.get("url") or ""}
 
                     # (1) New bid
                     cur = lv.get("current_bid") or 0
@@ -1375,7 +1396,7 @@ async def _run_keyword_check(w, now):
                 try:
                     await commhub.send_to_token(
                         token, title=f"🔎 Nya träffar för '{w['keyword']}'", body=body,
-                        data={"type": "keyword_watch", "keyword_watch_id": w["id"]})
+                        data={"type": "keyword_watch", "keyword_watch_id": w["id"], "url": f"/?kw={w['id']}"})
                 except Exception:
                     logger.exception("keyword push failed")
     await db.keyword_watches.update_one({"id": w["id"]}, {"$set": update})
