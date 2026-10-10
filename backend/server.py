@@ -27,7 +27,7 @@ import blocket
 import auctionet
 import commhub
 from fastapi import Header
-from crawler import Crawler, compute_fees, exp_fee_incl
+from crawler import Crawler, compute_fees, exp_fee_incl, record_price
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -83,10 +83,22 @@ def _clean(doc: dict) -> dict:
     return doc
 
 
-def _bid_history(doc: dict) -> list:
-    """Real observed price points, mapped to the chart's {timestamp, bid} shape."""
-    return [{"timestamp": h.get("t"), "bid": h.get("bid")}
-            for h in (doc.get("price_history") or []) if h.get("bid") is not None]
+def _bid_history(*docs, current: Optional[int] = None) -> list:
+    """Real observed price points (merged from live + watched docs), chart shape {timestamp, bid}."""
+    if current is not None and current <= 0:
+        return []  # no bids yet
+    pts = {}
+    for d in docs:
+        for h in (d or {}).get("price_history") or []:
+            if h.get("bid") and h.get("t"):
+                pts[h["t"]] = h["bid"]
+    out = []
+    for t, b in sorted(pts.items()):
+        if current and b > current:
+            continue  # a bid above the confirmed current bid is a stale/misparsed point
+        if not out or out[-1]["bid"] != b:
+            out.append({"timestamp": t, "bid": b})
+    return out
 
 
 def _real_bid_count(doc: dict) -> int:
@@ -552,14 +564,8 @@ async def scrape_preview(payload: WatchCreate, request: Request):
     return data
 
 
-@api_router.get("/auctions", response_model=List[Auction])
-async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str] = Header(None)):
-    if not x_device_id:
-        return []
-    query = {"device_id": x_device_id}
-    if source and source != "Alla":
-        query["source"] = source
-    docs = await db.auctions.find(query).sort("created_at", -1).to_list(500)
+async def _enrich_watched(docs):
+    """Overlay live bid/fee/end data and the merged real bid history on watched docs (in place)."""
     # Enrich each watched item with the latest fee/bid from the live feed so
     # Mina bevakningar always shows the current slagavgift, not a stale snapshot.
     urls = [d.get("url") for d in docs if d.get("url")]
@@ -595,9 +601,11 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
                       "ends_at", "bid_count"):
                 if lv.get(k) is not None:
                     d[k] = lv[k]
-            d["bid_count"] = _real_bid_count(lv)
-            d["bid_history"] = _bid_history(lv)
+            d["bid_history"] = _bid_history(lv, d, current=d.get("current_bid"))
+            # Each observed price rise is at least one bid, so the history length is a lower bound.
+            d["bid_count"] = max(lv.get("bid_count") or 0, d.get("bid_count") or 0, len(d["bid_history"]))
             continue
+        d["bid_history"] = _bid_history(d, current=d.get("current_bid"))
         sd = sold_map.get(d.get("url"))
         if sd:
             # Ended item: show the real FINAL (winning) price from the archive,
@@ -610,6 +618,17 @@ async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str]
                 d["total_now"] = sd["total_final"]
             if sd.get("bid_count") is not None:
                 d["bid_count"] = sd["bid_count"]
+
+
+@api_router.get("/auctions", response_model=List[Auction])
+async def list_auctions(source: Optional[str] = None, x_device_id: Optional[str] = Header(None)):
+    if not x_device_id:
+        return []
+    query = {"device_id": x_device_id}
+    if source and source != "Alla":
+        query["source"] = source
+    docs = await db.auctions.find(query).sort("created_at", -1).to_list(500)
+    await _enrich_watched(docs)
     # Sort: active items soonest-first, then ended (most recent first), then
     # items with no end time at all (e.g. Blocket classifieds) last.
     now_ts = datetime.now(timezone.utc)
@@ -632,6 +651,7 @@ async def get_auction(auction_id: str, device_id: str = Depends(require_device))
     doc = await db.auctions.find_one({"id": auction_id, "device_id": device_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
+    await _enrich_watched([doc])
     return Auction(**_clean(doc))
 
 
@@ -641,7 +661,9 @@ async def create_auction(payload: WatchCreate, request: Request, device_id: str 
     if not payload.url and not payload.keyword:
         raise HTTPException(status_code=400, detail="Ange en URL eller ett sökord.")
     data = await asyncio.to_thread(scraper.scrape_auction, payload.url, payload.keyword)
-    history = scraper.generate_bid_history(data["current_bid"], data["bid_count"])
+    now = datetime.now(timezone.utc).isoformat()
+    price_history = [{"t": now, "bid": data["current_bid"]}] if data["current_bid"] else []
+    history = _bid_history({"price_history": price_history})
     auction = Auction(
         source=data["source"],
         title=data["title"],
@@ -657,7 +679,7 @@ async def create_auction(payload: WatchCreate, request: Request, device_id: str 
         scraped=data.get("scraped", False),
         bid_history=history,
     )
-    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id})
+    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id, "price_history": price_history})
     return auction
 
 
@@ -704,27 +726,10 @@ async def refresh_auction(auction_id: str, request: Request, device_id: str = De
     doc = _clean(doc)
     if not doc.get("url"):
         raise HTTPException(status_code=400, detail="Objektet saknar länk och kan inte uppdateras.")
-    data = await asyncio.to_thread(scraper.scrape_auction, doc["url"], None)
-    new_bid = max(doc["current_bid"], data["current_bid"])
-    f = compute_fees(doc["source"], new_bid, doc)
-    buyer_fee, total_now = f["buyer_fee"], f["total_now"]
-    now = datetime.now(timezone.utc).isoformat()
-    history = doc.get("bid_history", [])
-    if new_bid > doc["current_bid"]:
-        history = history + [{
-            "timestamp": now, "bid": new_bid, "bidder": "Ny budgivare",
-            "increment": new_bid - doc["current_bid"],
-        }]
-    bid_count = doc.get("bid_count", 0) + (1 if new_bid > doc["current_bid"] else 0)
-    changes = {
-        "current_bid": new_bid, "buyer_fee": buyer_fee,
-        "buyer_fee_excl": f["buyer_fee_excl"], "fee_known": f["fee_known"],
-        "fee_note": f["fee_note"], "vat": f["vat"], "total_now": total_now,
-        "bid_count": bid_count, "bid_history": history, "updated_at": now,
-    }
-    await db.auctions.update_one({"id": auction_id}, {"$set": changes})
-    doc.update(changes)
-    return Auction(**doc)
+    await _refresh_watched_url(doc["url"])
+    doc = await db.auctions.find_one({"id": auction_id, "device_id": device_id})
+    await _enrich_watched([doc])
+    return Auction(**_clean(doc))
 
 
 @api_router.delete("/auctions/{auction_id}")
@@ -920,7 +925,7 @@ async def watch_live(payload: WatchCreate, device_id: str = Depends(require_devi
             doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0}) or doc
         except Exception:
             logger.exception("watch learn_fee failed")
-    history = _bid_history(doc)
+    history = _bid_history(doc, current=doc.get("current_bid"))
     auction = Auction(
         source=doc["source"], title=doc["title"], image=doc.get("image"),
         category=payload.category or "Övrigt", current_bid=doc["current_bid"],
@@ -933,7 +938,8 @@ async def watch_live(payload: WatchCreate, device_id: str = Depends(require_devi
         ends_at=doc.get("ends_at"),
         url=doc["url"], scraped=True, bid_history=history,
     )
-    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id})
+    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id,
+                                  "price_history": (doc.get("price_history") or [])[-200:]})
     return auction
 
 
@@ -1103,6 +1109,7 @@ async def startup():
     asyncio.create_task(_dedupe_device_tokens())
     asyncio.create_task(_backfill_watch_ends_at())
     asyncio.create_task(_backfill_sold_exp())
+    asyncio.create_task(_backfill_watch_history())
     asyncio.create_task(_watch_auto_refresh())
     asyncio.create_task(_watch_notifier())
     try:
@@ -1129,6 +1136,77 @@ async def _fetch_item_refresh(source, url):
     return None
 
 
+async def _refresh_watched_url(url, skip_ended=False) -> bool:
+    """Fetch the real current bid/bid count/end time for a watched url from its site and store it
+    on all watched copies + the live doc, recording the bid in the price history. True if written."""
+    now = datetime.now(timezone.utc)
+    s = await db.auctions.find_one(
+        {"url": url},
+        {"source": 1, "current_bid": 1, "ends_at": 1,
+         "starting_price": 1, "vat": 1, "buyer_fee_excl": 1})
+    if not s:
+        return False
+    end = _parse_iso(s.get("ends_at"))
+    if skip_ended and end and end < now:
+        return False
+    res = await _fetch_item_refresh(s.get("source"), url)
+    if not res:
+        return False
+    changes = {"updated_at": now.isoformat()}
+    new_bid = res.get("current_bid")
+    if new_bid:
+        # Build the fee context from the live doc's learned inputs so
+        # exact per-object fees (e.g. Tovek slagavgift) survive.
+        lv = await db.live_auctions.find_one(
+            {"url": url},
+            {"fee_inputs": 1, "starting_price": 1, "vat": 1})
+        ctx = dict((lv or {}).get("fee_inputs") or {})
+        ctx.setdefault("fee_excl", s.get("buyer_fee_excl"))
+        ctx["starting_price"] = (lv or {}).get("starting_price") or s.get("starting_price")
+        if (lv or {}).get("vat") is not None:
+            ctx["vat"] = lv["vat"]
+        for k in ("fee_excl", "fee_vat", "vat"):
+            if res.get(k) is not None:
+                ctx[k] = res[k]
+        f = compute_fees(s.get("source"), new_bid, ctx)
+        changes.update({
+            "current_bid": new_bid, "buyer_fee": f["buyer_fee"],
+            "buyer_fee_excl": f["buyer_fee_excl"], "fee_known": f["fee_known"],
+            "fee_note": f["fee_note"], "vat": f["vat"],
+            "total_now": f["total_now"],
+        })
+    if res.get("bid_count") is not None:
+        changes["bid_count"] = res["bid_count"]
+    if res.get("ends_at"):
+        changes["ends_at"] = res["ends_at"]
+    if len(changes) <= 1:  # only updated_at — nothing worth writing
+        return False
+    await db.auctions.update_many({"url": url}, {"$set": changes})
+    await db.live_auctions.update_one({"url": url}, {"$set": changes})
+    if new_bid:
+        await record_price(db, url, new_bid, now.isoformat())
+    return True
+
+
+async def _backfill_watch_history():
+    """Self-heal (idempotent): give every watched doc its own real price_history, seeded from the
+    live doc's observed points + earlier real (non-simulated) bid_history entries."""
+    await asyncio.sleep(10)
+    try:
+        async for a in db.auctions.find({"price_history": {"$exists": False}}):
+            lv = await db.live_auctions.find_one({"url": a.get("url")}, {"price_history": 1}) if a.get("url") else None
+            pts = {h["t"]: h["bid"] for h in (lv or {}).get("price_history") or [] if h.get("t") and h.get("bid")}
+            for h in a.get("bid_history") or []:
+                if "bidder" not in h and h.get("timestamp") and h.get("bid"):
+                    pts.setdefault(str(h["timestamp"]), h["bid"])
+            if a.get("current_bid") and a["current_bid"] not in pts.values():
+                pts[a.get("updated_at") or a.get("created_at") or datetime.now(timezone.utc).isoformat()] = a["current_bid"]
+            hist = [{"t": t, "bid": b} for t, b in sorted(pts.items())][-200:]
+            await db.auctions.update_one({"_id": a["_id"]}, {"$set": {"price_history": hist}})
+    except Exception:
+        logger.exception("backfill watch history")
+
+
 async def _watch_auto_refresh():
     """Every 30 min, refresh each distinct watched item's live price directly
     (per-item), so watchlists stay current regardless of the background crawl
@@ -1138,53 +1216,10 @@ async def _watch_auto_refresh():
     while True:
         try:
             urls = await db.auctions.distinct("url", {"url": {"$nin": [None, ""]}})
-            now = datetime.now(timezone.utc)
             for url in urls:
                 try:
-                    s = await db.auctions.find_one(
-                        {"url": url},
-                        {"source": 1, "current_bid": 1, "ends_at": 1,
-                         "starting_price": 1, "vat": 1, "buyer_fee_excl": 1})
-                    if not s:
-                        continue
-                    end = _parse_iso(s.get("ends_at"))
-                    if end and end < now:
-                        continue  # ended — nothing to refresh
-                    res = await _fetch_item_refresh(s.get("source"), url)
-                    if not res:
-                        continue
-                    changes = {"updated_at": now.isoformat()}
-                    new_bid = res.get("current_bid")
-                    if new_bid:
-                        # Build the fee context from the live doc's learned inputs so
-                        # exact per-object fees (e.g. Tovek slagavgift) survive.
-                        lv = await db.live_auctions.find_one(
-                            {"url": url},
-                            {"fee_inputs": 1, "starting_price": 1, "vat": 1})
-                        ctx = dict((lv or {}).get("fee_inputs") or {})
-                        ctx.setdefault("fee_excl", s.get("buyer_fee_excl"))
-                        ctx["starting_price"] = (lv or {}).get("starting_price") or s.get("starting_price")
-                        if (lv or {}).get("vat") is not None:
-                            ctx["vat"] = lv["vat"]
-                        for k in ("fee_excl", "fee_vat", "vat"):
-                            if res.get(k) is not None:
-                                ctx[k] = res[k]
-                        f = compute_fees(s.get("source"), new_bid, ctx)
-                        changes.update({
-                            "current_bid": new_bid, "buyer_fee": f["buyer_fee"],
-                            "buyer_fee_excl": f["buyer_fee_excl"], "fee_known": f["fee_known"],
-                            "fee_note": f["fee_note"], "vat": f["vat"],
-                            "total_now": f["total_now"],
-                        })
-                    if res.get("bid_count") is not None:
-                        changes["bid_count"] = res["bid_count"]
-                    if res.get("ends_at"):
-                        changes["ends_at"] = res["ends_at"]
-                    if len(changes) <= 1:  # only updated_at — nothing worth writing
-                        continue
-                    await db.auctions.update_many({"url": url}, {"$set": changes})
-                    await db.live_auctions.update_one({"url": url}, {"$set": changes})
-                    await asyncio.sleep(2)  # be gentle on proxies
+                    if await _refresh_watched_url(url, skip_ended=True):
+                        await asyncio.sleep(2)  # be gentle on proxies
                 except Exception:
                     logger.exception("auto-refresh failed for %s", url)
         except Exception:

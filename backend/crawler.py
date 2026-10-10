@@ -126,6 +126,16 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+async def record_price(db, url, bid, t):
+    """Append a real observed bid to the live doc AND every watched copy (only if it differs from the last point)."""
+    if not url or not bid:
+        return
+    point = {"t": t, "bid": bid}
+    differs = {"$expr": {"$ne": [{"$arrayElemAt": [{"$ifNull": ["$price_history.bid", []]}, -1]}, bid]}}
+    await db.live_auctions.update_one({"url": url, **differs}, {"$push": {"price_history": {"$each": [point], "$slice": -200}}})
+    await db.auctions.update_many({"url": url, **differs}, {"$push": {"price_history": {"$each": [point], "$slice": -200}}})
+
+
 def _iso():
     return _now().isoformat()
 
@@ -410,10 +420,9 @@ class Crawler:
                 update["starting_price"] = it["starting_price"]
             if it.get("search_q"):
                 update["search_q"] = it["search_q"]
-            if bid and bid != existing.get("current_bid"):
-                hist = existing.get("price_history", []) + [{"t": now, "bid": bid}]
-                update["price_history"] = hist[-200:]
             await self.db.live_auctions.update_one({"url": it["url"]}, {"$set": update})
+            if bid and not keep_bid:
+                await record_price(self.db, it["url"], bid, now)
         else:
             await self.db.live_auctions.insert_one({
                 "source": it["source"], "title": it["title"], "image": image,
@@ -469,10 +478,9 @@ class Crawler:
                 update["total_now"] = f["total_now"]
                 if new_bid:
                     update["current_bid"] = new_bid
-                    if new_bid != doc.get("current_bid"):
-                        hist = doc.get("price_history", []) + [{"t": now, "bid": new_bid}]
-                        update["price_history"] = hist[-200:]
         await self.db.live_auctions.update_one({"url": url}, {"$set": update})
+        if res and res.get("current_bid"):
+            await record_price(self.db, url, res["current_bid"], now)
 
     async def learn_fee(self, url):
         """On-demand fee learning for a single (usually watched) item. For Blinto
