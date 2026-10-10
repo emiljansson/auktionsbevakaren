@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import "@/App.css";
 import { AnimatePresence, motion } from "framer-motion";
 import { Gavel, Plus, Radar, Sparkles, Wallet, Layers, TrendingDown, Loader2, Bell, BellRing, Search } from "lucide-react";
@@ -120,6 +120,14 @@ function App() {
 
   const openDetail = (a) => { setSelected(a); setDetailOpen(true); };
   const openLiveDetail = (a) => openDetail({ ...a, scraped: true });
+
+  // When a countdown hits 0, fetch the final bid shortly after (debounced across cards).
+  const endTimer = useRef(null);
+  const onAuctionEnded = useCallback((id) => {
+    setTimeout(() => api.refresh(id).catch(() => {}), 10000);
+    clearTimeout(endTimer.current);
+    endTimer.current = setTimeout(() => load(), 20000);
+  }, [load]);
 
   const handleNavigate = useCallback(async (path) => {
     const p = new URL(path, window.location.origin).searchParams;
@@ -286,7 +294,7 @@ function App() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid="auctions-grid">
             <AnimatePresence mode="popLayout">
               {auctions.map((a) => (
-                <AuctionCard key={a.id} auction={a} onOpen={openDetail} onDelete={handleDelete} />
+                <AuctionCard key={a.id} auction={a} onOpen={openDetail} onDelete={handleDelete} onEnded={() => onAuctionEnded(a.id)} />
               ))}
             </AnimatePresence>
           </div>

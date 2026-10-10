@@ -2,7 +2,8 @@ import { motion } from "framer-motion";
 import { Clock, Gavel, ExternalLink, Trash2, Sparkles, TrendingDown, TrendingUp, Minus, Coins } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { badgeClass, formatSEK, timeLeft } from "@/lib/sources";
+import { badgeClass, formatSEK } from "@/lib/sources";
+import { countdownClass, useTimeLeft } from "@/lib/useTimeLeft";
 
 const positionChip = {
   under: { cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30", icon: TrendingDown, label: "Bra köpläge" },
@@ -10,8 +11,8 @@ const positionChip = {
   over: { cls: "bg-red-500/15 text-red-400 border-red-500/30", icon: TrendingUp, label: "Över värde" },
 };
 
-export const AuctionCard = ({ auction, onOpen, onDelete }) => {
-  const tl = timeLeft(auction.ends_at);
+export const AuctionCard = ({ auction, onOpen, onDelete, onEnded }) => {
+  const tl = useTimeLeft(auction.ends_at, onEnded);
   const val = auction.valuation;
   const pos = val && positionChip[val.market_position];
 
@@ -38,8 +39,8 @@ export const AuctionCard = ({ auction, onOpen, onDelete }) => {
           {auction.source}
         </Badge>
         {tl && (
-          <div className={`absolute right-3 top-3 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold backdrop-blur-md ${tl.ended ? "bg-slate-900/80 text-slate-400" : "bg-amber-500/90 text-slate-950"}`}>
-            <Clock className="h-3 w-3" /> {tl.label}
+          <div className={`absolute right-3 top-3 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold backdrop-blur-md ${countdownClass(tl)}`} data-testid={`countdown-${auction.id}`}>
+            <Clock className="h-3 w-3" /> <span className="tabular-nums">{tl.label}</span>
           </div>
         )}
         {!auction.scraped && (

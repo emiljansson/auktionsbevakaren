@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
-import { badgeClass, formatSEK, timeLeft } from "@/lib/sources";
+import { badgeClass, formatSEK } from "@/lib/sources";
+import { useTimeLeft } from "@/lib/useTimeLeft";
 
 const posMeta = {
   under: { cls: "text-emerald-400", icon: TrendingDown, label: "Under marknadsvärde" },
@@ -39,6 +40,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
   const [removed, setRemoved] = useState(() => new Set());
   const [removing, setRemoving] = useState(null);
   useEffect(() => { setRemoved(new Set()); }, [auction?.url]);
+  const tl = useTimeLeft(auction?.ends_at);
   if (!auction) return null;
   const val = auction.valuation;
   const _median = (xs) => {
@@ -67,7 +69,6 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
     }
   };
   const pm = val && posMeta[val.market_position];
-  const tl = timeLeft(auction.ends_at);
   const chartData = (auction.bid_history || []).map((b) => ({ ...b }));
   // Highest bid can never be lower than the current (live) bid — in an ascending
   // auction the current bid IS the highest. Guard against stale/partial history
@@ -81,7 +82,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
         <DialogHeader>
           <div className="flex flex-wrap items-center gap-2">
             <Badge className={`border font-mono text-[11px] ${badgeClass(auction.source)}`}>{auction.source}</Badge>
-            {tl && <span className="flex items-center gap-1 text-xs text-slate-400"><Clock className="h-3 w-3" /> {tl.label}</span>}
+            {tl && <span className={`flex items-center gap-1 text-xs tabular-nums ${tl.urgent ? "animate-pulse font-semibold text-red-400" : "text-slate-400"}`} data-testid="detail-countdown"><Clock className="h-3 w-3" /> {tl.label}</span>}
             {!auction.scraped && <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400">simulerad data</span>}
           </div>
           <DialogTitle className="break-words pr-6 font-heading text-lg sm:text-xl">{auction.title}</DialogTitle>

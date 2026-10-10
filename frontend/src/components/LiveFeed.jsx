@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import { badgeClass, formatSEK, timeLeft } from "@/lib/sources";
+import { badgeClass, formatSEK } from "@/lib/sources";
+import { countdownClass, useTimeLeft } from "@/lib/useTimeLeft";
 import { usePush } from "@/context/push";
 
 const STATUS_CHIP = {
@@ -19,7 +20,7 @@ const STATUS_CHIP = {
 };
 
 export const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
-  const tl = timeLeft(a.ends_at);
+  const tl = useTimeLeft(a.ends_at);
   return (
   <motion.div
     layout
@@ -34,8 +35,8 @@ export const LiveCard = ({ a, onWatch, watching, locked, onOpen }) => {
       <div className="absolute inset-0 bg-gradient-to-t from-[#111827] to-transparent" />
       <Badge className={`absolute left-2 top-2 border font-mono text-[10px] ${badgeClass(a.source)}`} style={{ backgroundColor: "rgba(11,15,25,0.65)" }}>{a.source}</Badge>
       {tl && (
-        <div className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold backdrop-blur-md ${tl.ended ? "bg-slate-900/80 text-slate-400" : "bg-amber-500/90 text-slate-950"}`}>
-          {tl.ended ? "Avslutad" : `⏱ ${tl.label}`}
+        <div className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold backdrop-blur-md ${countdownClass(tl)}`} data-testid="live-countdown">
+          <span className="tabular-nums">{tl.ended ? "Avslutad" : `⏱ ${tl.label}`}</span>
         </div>
       )}
       {a.fee_known && (
