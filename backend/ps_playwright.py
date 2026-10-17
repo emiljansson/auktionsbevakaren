@@ -96,6 +96,48 @@ async def _bee(url):
         return r.text
 
 
+
+async def _local_fetch(url):
+    """Fetch rendered HTML using local Chromium."""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page(locale="sv-SE")
+            await page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000,
+            )
+
+            selector = (
+                'a[href*="/auction/"]'
+                if url.rstrip("/") == INDEX_URL
+                else 'a[href*="/item/view/"]'
+            )
+
+            await page.locator(selector).first.wait_for(
+                state="attached",
+                timeout=30000,
+            )
+
+            return await page.content()
+        finally:
+            await browser.close()
+
+
+async def _fetch(url):
+    """Prefer local Chromium; optionally fall back to ScrapingBee."""
+    try:
+        return await _local_fetch(url)
+    except Exception as exc:
+        logger.warning("PS local fetch failed %s: %s", url, exc)
+        if SCRAPINGBEE_API_KEY:
+            return await _bee(url)
+        raise
+
+
 def _parse_exact(s):
     m = re.match(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})", (s or "").strip())
     return f"{m.group(1)}T{m.group(2)}:00+02:00" if m else None
