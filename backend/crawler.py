@@ -208,12 +208,26 @@ class Crawler:
         await asyncio.sleep(5)
         while self.running:
             try:
-                items = await asyncio.wait_for(ps_playwright.collect(), timeout=900)
-                if items:
-                    for it in items:
-                        await self._upsert(it)
-                    self.ps_status = f"{len(items)} objekt ({_iso()[11:16]})"
-                    logger.info("PS Auction task upserted %s items", len(items))
+                batches = await asyncio.wait_for(
+                    ps_playwright.collect(), timeout=900
+                )
+                saved = 0
+                for auction_url, items in batches:
+                    try:
+                        for it in items:
+                            await self._upsert(it)
+                        await ps_playwright.acknowledge_auction(auction_url)
+                        saved += len(items)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.warning(
+                            "PS auction DB save failed %s: %s",
+                            auction_url, exc,
+                        )
+                if batches:
+                    self.ps_status = f"{saved} objekt ({_iso()[11:16]})"
+                    logger.info("PS Auction task upserted %s items", saved)
             except asyncio.CancelledError:
                 raise
             except Exception as e:

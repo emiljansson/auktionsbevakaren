@@ -51,6 +51,8 @@ _last_soon = 0.0
 _last_attempt = 0.0
 _pending_auctions = []
 _pending_mode = None
+_active_mode = None
+_active_started = 0.0
 RETRY_INTERVAL = int(os.environ.get("PS_RETRY_INTERVAL_H", "6")) * 3600
 
 # Budget gate timestamps live in MongoDB (collection `crawler_state`, _id
@@ -99,6 +101,7 @@ async def _save_state():
         )
     except Exception:
         logger.exception("PS state save failed")
+        raise
 
 
 async def _bee(url):
@@ -344,9 +347,10 @@ async def _crawl_auction(au, sem, context):
 
 
 async def collect():
-    """Budget-aware, time-gated PS Auction crawl. Returns item records (maybe [])."""
-    global _last_full, _last_soon, _last_attempt
-    global _pending_auctions, _pending_mode
+    """Collect PS items; caller must acknowledge each auction after DB upsert."""
+    global _last_attempt, _pending_auctions, _pending_mode
+    global _active_mode, _active_started
+
     now = time.time()
 
     if _pending_auctions:
@@ -356,10 +360,11 @@ async def collect():
     elif now - _last_soon >= SOON_INTERVAL:
         mode = "soon"
     else:
-        return []  # gated — no network, no credits
+        return []
 
     if now - _last_attempt < RETRY_INTERVAL:
         return []
+
     _last_attempt = now
     await _save_state()
 
@@ -367,15 +372,9 @@ async def collect():
         async with _browser_session() as context:
             if _pending_auctions:
                 targets = list(_pending_auctions)
-                logger.info(
-                    "PS resuming %s pending auctions",
-                    len(targets),
-                )
             else:
-                index_html = await _session_fetch_with_fallback(
-                    context, INDEX_URL
-                )
-                running = _running_auctions(index_html)
+                html = await _session_fetch_with_fallback(context, INDEX_URL)
+                running = _running_auctions(html)
 
                 if not running:
                     logger.warning("PS index returned no running auctions")
@@ -383,133 +382,82 @@ async def collect():
 
                 if mode == "soon":
                     targets = [
-                        u for s, u in running if s <= SOON_WINDOW
+                        url for seconds, url in running
+                        if seconds <= SOON_WINDOW
                     ][:MAX_AUCTIONS]
                 else:
-                    targets = [u for _, u in running][:MAX_AUCTIONS]
+                    targets = [url for _, url in running][:MAX_AUCTIONS]
 
-            logger.info(
-                "PS Auction %s pass: %s auctions",
-                mode, len(targets)
-            )
+                # Persist the work queue BEFORE fetching auction pages.
+                _pending_auctions = list(targets)
+                _pending_mode = mode
+                await _save_state()
+
+            _active_mode = mode
+            _active_started = now
 
             sem = asyncio.Semaphore(min(CONCURRENCY, 2))
             outcomes = await asyncio.gather(
-                *[
-                    _crawl_auction(au, sem, context)
-                    for au in targets
-                ],
+                *[_crawl_auction(url, sem, context) for url in targets],
                 return_exceptions=True,
             )
 
-            failures = [
-                (url, result)
-                for url, result in zip(targets, outcomes)
-                if isinstance(result, BaseException)
-            ]
-
-            for url, error in failures:
-                logger.warning(
-                    "PS auction crawl failed %s: %s", url, error
-                )
-
-            chunks = [
-                result for result in outcomes
-                if not isinstance(result, BaseException)
-            ]
-
-            complete = not failures
-            _pending_auctions = [url for url, _ in failures]
-            _pending_mode = mode if failures else None
-            await _save_state()
-
-            if failures:
-                logger.warning(
-                    "PS partial collection: %s/%s auctions succeeded",
-                    len(chunks), len(targets),
-                )
-    except Exception as e:
-        logger.warning("PS collection failed: %s", e)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("PS collection failed: %s", exc)
         return []
-    results, seen = [], set()
-    for ch in chunks:
-        for it in ch:
-            if it["url"] in seen:
-                continue
-            seen.add(it["url"])
-            results.append(it)
 
-    if len(results) > MAX_ITEMS:
+    batches = []
+    total = 0
+
+    for url, result in zip(targets, outcomes):
+        if isinstance(result, BaseException):
+            logger.warning("PS auction failed %s: %s", url, result)
+            continue
+
+        total += len(result)
+        batches.append((url, result))
+
+    if total > MAX_ITEMS:
         logger.warning(
-            "PS collection exceeds MAX_ITEMS: %s > %s; "
-            "refusing to mark the crawl complete",
-            len(results), MAX_ITEMS,
+            "PS collection exceeds MAX_ITEMS: %s > %s",
+            total, MAX_ITEMS,
         )
         return []
 
-    # Only arm the time-gate after a completely successful crawl.
-    # Partial results can still be saved by the caller.
-    if complete:
-        if mode == "soon":
-            _last_soon = now
-        else:
-            _last_full = _last_soon = now
+    # The caller persists each batch, then calls acknowledge_auction().
+    return batches
+
+
+async def acknowledge_auction(url):
+    """Remove an auction only after every item was persisted successfully."""
+    global _pending_auctions, _pending_mode
+    global _last_full, _last_soon
+
+    if url not in _pending_auctions:
+        raise ValueError(f"PS auction not pending: {url}")
+
+    previous = list(_pending_auctions)
+    previous_mode = _pending_mode
+    previous_full = _last_full
+    previous_soon = _last_soon
+
+    _pending_auctions = [u for u in _pending_auctions if u != url]
+
+    if not _pending_auctions:
+        mode = _pending_mode or _active_mode
+        if mode == "full":
+            _last_full = _last_soon = _active_started
+        elif mode == "soon":
+            _last_soon = _active_started
+        _pending_mode = None
+
+    try:
         await _save_state()
-    else:
-        logger.warning(
-            "PS partial results returned without advancing crawl gate"
-        )
-
-    return results[:MAX_ITEMS]
-
-
-
-async def refresh_item(url):
-    """Refresh a single PS Auction item using local Chromium."""
-    html = None
-
-    for attempt in range(2):
-        try:
-            async with _browser_session() as context:
-                html = await _session_fetch_with_fallback(
-                    context, url
-                )
-            break
-        except Exception as e:
-            logger.warning(
-                "PS refresh_item failed %s (try %s): %s",
-                url, attempt + 1, e
-            )
-            if attempt == 0:
-                await asyncio.sleep(3)
-
-    if not html:
-        return None
-
-    txt = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
-
-    bm = (
-        re.search(
-            r"Ledande bud\s*([\d\s\u00a0]+?)\s*SEK",
-            txt
-        )
-        or re.search(
-            r"Högsta bud\s*([\d\s\u00a0]+?)\s*SEK",
-            txt
-        )
-    )
-
-    if not bm:
-        return None
-
-    bid = int(
-        bm.group(1).replace("\u00a0", "").replace(" ", "")
-    )
-
-    res = {"current_bid": bid}
-
-    cm = re.search(r"(\d+)\s*bud\b", txt)
-    if cm:
-        res["bid_count"] = int(cm.group(1))
-
-    return res
+    except BaseException:
+        _pending_auctions = previous
+        _pending_mode = previous_mode
+        _last_full = previous_full
+        _last_soon = previous_soon
+        raise
