@@ -1035,18 +1035,20 @@ async def startup():
         await db.sold_items.create_index([("title", "text")])
     except Exception:
         logger.exception("could not create sold_items indexes")
-    crawler.start()
-    asyncio.create_task(_dedupe_device_tokens())
-    asyncio.create_task(_backfill_watch_ends_at())
-    asyncio.create_task(_backfill_sold_exp())
-    asyncio.create_task(_watch_auto_refresh())
-    asyncio.create_task(_watch_notifier())
+    if os.environ.get("ENABLE_BACKGROUND_JOBS", "false").lower() == "true":
+        crawler.start()
+        asyncio.create_task(_dedupe_device_tokens())
+        asyncio.create_task(_backfill_watch_ends_at())
+        asyncio.create_task(_backfill_sold_exp())
+        asyncio.create_task(_watch_auto_refresh())
+        asyncio.create_task(_watch_notifier())
     try:
         await db.keyword_watches.create_index("device_id")
         await db.keyword_watches.create_index([("device_id", 1), ("keyword_lower", 1)], unique=True)
     except Exception:
         logger.exception("could not create keyword_watches index")
-    asyncio.create_task(_keyword_watch_loop())
+    if os.environ.get("ENABLE_BACKGROUND_JOBS", "false").lower() == "true":
+        asyncio.create_task(_keyword_watch_loop())
 
 
 async def _fetch_item_refresh(source, url):

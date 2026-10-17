@@ -1,3 +1,7 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from datetime import datetime
+from zoneinfo import ZoneInfo
 """Site adapters for automatic auction discovery.
 
 Each adapter exposes:
@@ -64,7 +68,7 @@ def _netauktion_ends(text):
     t = m.group(2)
     if len(t) == 5:
         t += ":00"
-    return f"{m.group(1)}T{t}+02:00"
+    return datetime.fromisoformat(f"{m.group(1)}T{t}").replace(tzinfo=ZoneInfo("Europe/Stockholm")).isoformat()
 
 
 async def _get(url):
@@ -492,15 +496,15 @@ class NetauktionAdapter:
 
 
 # ---- Tovek (Next.js Server Actions, no login needed) ----
-TOVEK_ACT_AUCTIONS = "7f8f949b85599ee0545667288ad781b5e46ed3822d"
-TOVEK_ACT_ITEMS = "7f88556099d83557895271d6f6135913755dfc8976"
-TOVEK_ACT_BIDS = "7f793e0ef55011c257e2db8306e27783b561adaa5f"
+TOVEK_ACT_AUCTIONS = "7fed40d39c5dc37e5a2804c72ef3b51c94cef75da6"
+TOVEK_ACT_ITEMS = "7fb889a52d5d76fc29f37286bf9d2814d9e629d991"
+TOVEK_ACT_BIDS = "7f16e5d8939a9ed767b293d5c6fefad2ad8d26d0fe"
 TOVEK_PAGE = "https://tovek.se/auktioner/pagaende-auktioner"
 
 
 async def _tovek_action(action_id, args):
     headers = {
-        **HEADERS, "Origin": "https://tovek.se", "Referer": TOVEK_PAGE,
+        "Origin": "https://tovek.se", "Referer": TOVEK_PAGE,
         "Next-Action": action_id, "Content-Type": "text/plain;charset=UTF-8",
         "Accept": "text/x-component",
     }
@@ -533,7 +537,7 @@ def _tovek_ends(s):
     t = m.group(2)
     if len(t) == 5:
         t += ":00"
-    return f"{m.group(1)}T{t}+02:00"
+    return datetime.fromisoformat(f"{m.group(1)}T{t}").replace(tzinfo=ZoneInfo("Europe/Stockholm")).isoformat()
 
 
 class TovekAdapter:
@@ -557,35 +561,70 @@ class TovekAdapter:
 
     async def discover(self):
         raw, seen_parts = [], set()
-        for page in range(1, 25):
-            data = await _tovek_action(TOVEK_ACT_AUCTIONS, [{"partStatus": "running"}, page])
-            aucs = [a for a in data.get("auctions", []) if a.get("partStatus") == "running"]
-            if not aucs:
+
+        # Hämta alla pågående auktioner med sidindelning.
+        for offset in range(0, 1000, 50):
+            data = await _tovek_action(
+                TOVEK_ACT_AUCTIONS,
+                [{
+                    "partStatus": ["running"],
+                    "offset": offset,
+                    "limit": 50,
+                    "sort": {"partAuctionStart": "desc"},
+                }]
+            )
+
+            auctions = data.get("auctions", [])
+            if not auctions:
                 break
-            for a in aucs:
+
+            for a in auctions:
+                if a.get("partStatus") != "running":
+                    continue
+
                 pid = a.get("partId")
                 if not pid or pid in seen_parts:
                     continue
+
                 seen_parts.add(pid)
-                try:
-                    idata = await _tovek_action(TOVEK_ACT_ITEMS, [int(pid)])
-                except Exception:
-                    continue
-                for it in idata.get("auctionItems", []):
-                    if it.get("itemStatus") != "active" or not it.get("itemId"):
-                        continue
-                    imgs = it.get("images") or []
-                    raw.append({
-                        "iid": it["itemId"],
-                        "title": (it.get("itemTitle") or "Objekt").strip(),
-                        "image": imgs[0] if imgs else None,
-                        "min": it.get("itemMinBid") or 0,
-                        # Tovek exposes the exact per-object slagavgift (EXCL VAT,
-                        # +25% moms) and the bid VAT% publicly on every rop.
-                        "fee_excl": it.get("itemFeeValue"),
-                        "vat": it.get("itemVatValue"),
-                        "ends_item": _tovek_ends(it.get("itemEndTime") or it.get("itemLastEndDate")),
-                    })
+
+                # Hämta samtliga objekt i auktionen.
+                for item_offset in range(0, 10000, 100):
+                    idata = await _tovek_action(
+                        TOVEK_ACT_ITEMS,
+                        [int(pid), {
+                            "offset": item_offset,
+                            "limit": 100
+                        }]
+                    )
+
+                    items = idata.get("auctionItems", [])
+                    if not items:
+                        break
+
+                    for it in items:
+                        if it.get("itemStatus") != "active" or not it.get("itemId"):
+                            continue
+
+                        imgs = it.get("images") or []
+                        raw.append({
+                            "iid": it["itemId"],
+                            "title": (it.get("itemTitle") or "Objekt").strip(),
+                            "image": imgs[0] if imgs else None,
+                            "min": it.get("itemMinBid") or 0,
+                            "fee_excl": it.get("itemFeeValue"),
+                            "vat": it.get("itemVatValue"),
+                            "ends_item": _tovek_ends(
+                                it.get("itemEndTime") or it.get("itemLastEndDate")
+                            ),
+                        })
+
+                    if len(items) < 100:
+                        break
+
+            if len(auctions) < 50:
+                break
+
         bids = await self._bids_map([r["iid"] for r in raw])
         out = []
         for r in raw:

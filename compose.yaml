@@ -1,0 +1,46 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: "no"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - auktiomera
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: auktiomera-backend:latest
+    restart: "no"
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: auktiomera_local
+      ENABLE_BACKGROUND_JOBS: "true"
+      CORS_ORIGINS: "*"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      - mongo
+    networks:
+      - auktiomera
+
+  frontend:
+    image: auktiomera-frontend:latest
+    restart: "no"
+    environment:
+      REACT_APP_BACKEND_URL: http://localhost:8000
+      HOST: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - auktiomera
+
+volumes:
+  mongo_data:
+
+networks:
+  auktiomera:

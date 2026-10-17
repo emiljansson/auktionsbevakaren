@@ -8,7 +8,11 @@ import os
 import json
 import re
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+try:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+except ImportError:
+    LlmChat = None
+    UserMessage = None
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 
@@ -70,6 +74,10 @@ Returnera JSON med EXAKT dessa fält:
   "insight": "<1-2 meningar på svenska. Nämn om bedömningen bygger på verkliga auktionsslutpriser.>"
 }}"""
 
+    if LlmChat is None or UserMessage is None:
+        raise RuntimeError(
+            "AI-prisvärdering är inte aktiverad i den lokala installationen."
+        )    
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id="valuation",
