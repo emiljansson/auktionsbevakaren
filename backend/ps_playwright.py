@@ -49,6 +49,8 @@ _TIME_RE = re.compile(r"\d+[DdHhMm]")
 _last_full = 0.0
 _last_soon = 0.0
 _last_attempt = 0.0
+_pending_auctions = []
+_pending_mode = None
 RETRY_INTERVAL = int(os.environ.get("PS_RETRY_INTERVAL_H", "6")) * 3600
 
 # Budget gate timestamps live in MongoDB (collection `crawler_state`, _id
@@ -65,6 +67,7 @@ def set_db(db):
 
 async def _load_state():
     global _last_full, _last_soon, _last_attempt
+    global _pending_auctions, _pending_mode
     if _db is None:
         return
     try:
@@ -73,6 +76,8 @@ async def _load_state():
             _last_full = float(doc.get("last_full", 0))
             _last_soon = float(doc.get("last_soon", 0))
             _last_attempt = float(doc.get("last_attempt", 0))
+            _pending_auctions = list(doc.get("pending_auctions") or [])
+            _pending_mode = doc.get("pending_mode")
     except Exception:
         logger.exception("PS state load failed")
 
@@ -87,6 +92,8 @@ async def _save_state():
                 "last_full": _last_full,
                 "last_soon": _last_soon,
                 "last_attempt": _last_attempt,
+                "pending_auctions": _pending_auctions,
+                "pending_mode": _pending_mode,
             }},
             upsert=True,
         )
@@ -338,11 +345,13 @@ async def _crawl_auction(au, sem, context):
 
 async def collect():
     """Budget-aware, time-gated PS Auction crawl. Returns item records (maybe [])."""
-    global _last_full, _last_soon
+    global _last_full, _last_soon, _last_attempt
+    global _pending_auctions, _pending_mode
     now = time.time()
-    global _last_attempt
 
-    if now - _last_full >= FULL_INTERVAL:
+    if _pending_auctions:
+        mode = _pending_mode or "full"
+    elif now - _last_full >= FULL_INTERVAL:
         mode = "full"
     elif now - _last_soon >= SOON_INTERVAL:
         mode = "soon"
@@ -356,21 +365,28 @@ async def collect():
 
     try:
         async with _browser_session() as context:
-            index_html = await _session_fetch_with_fallback(
-                context, INDEX_URL
-            )
-            running = _running_auctions(index_html)
-
-            if not running:
-                logger.warning("PS index returned no running auctions")
-                return []
-
-            if mode == "soon":
-                targets = [
-                    u for s, u in running if s <= SOON_WINDOW
-                ][:MAX_AUCTIONS]
+            if _pending_auctions:
+                targets = list(_pending_auctions)
+                logger.info(
+                    "PS resuming %s pending auctions",
+                    len(targets),
+                )
             else:
-                targets = [u for _, u in running][:MAX_AUCTIONS]
+                index_html = await _session_fetch_with_fallback(
+                    context, INDEX_URL
+                )
+                running = _running_auctions(index_html)
+
+                if not running:
+                    logger.warning("PS index returned no running auctions")
+                    return []
+
+                if mode == "soon":
+                    targets = [
+                        u for s, u in running if s <= SOON_WINDOW
+                    ][:MAX_AUCTIONS]
+                else:
+                    targets = [u for _, u in running][:MAX_AUCTIONS]
 
             logger.info(
                 "PS Auction %s pass: %s auctions",
@@ -403,6 +419,9 @@ async def collect():
             ]
 
             complete = not failures
+            _pending_auctions = [url for url, _ in failures]
+            _pending_mode = mode if failures else None
+            await _save_state()
 
             if failures:
                 logger.warning(
