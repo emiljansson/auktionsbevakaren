@@ -20,6 +20,7 @@ import re
 import time
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -138,6 +139,74 @@ async def _fetch(url):
         raise
 
 
+
+@asynccontextmanager
+async def _browser_session():
+    """Reuse one Chromium browser for a collection pass."""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(locale="sv-SE")
+        try:
+            yield context
+        finally:
+            await context.close()
+            await browser.close()
+
+
+async def _session_fetch(context, url):
+    """Fetch rendered HTML using the shared Chromium browser."""
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout=60000,
+        )
+
+        if response and response.status >= 400:
+            raise RuntimeError(
+                f"PS Auction returned HTTP {response.status}: {url}"
+            )
+
+        path = url.split("?", 1)[0].rstrip("/")
+
+        if path == INDEX_URL.rstrip("/"):
+            selector = 'a[href*="/auction/"]'
+        elif re.search(r"/auction/\d+/[^/]+(?:/sida=\d+)?$", path):
+            selector = 'a[href*="/item/view/"]'
+        elif re.search(r"/item/view/\d+", path):
+            selector = None
+        else:
+            selector = None
+
+        if selector:
+            await page.locator(selector).first.wait_for(
+                state="attached",
+                timeout=30000,
+            )
+        else:
+            await page.locator("body").wait_for(
+                state="attached",
+                timeout=10000,
+            )
+
+        return await page.content()
+    finally:
+        await page.close()
+
+
+async def _session_fetch_with_fallback(context, url):
+    try:
+        return await _session_fetch(context, url)
+    except Exception as exc:
+        logger.warning("PS Chromium failed %s: %s", url, exc)
+        if SCRAPINGBEE_API_KEY:
+            return await _bee(url)
+        raise
+
+
 def _parse_exact(s):
     m = re.match(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})", (s or "").strip())
     return f"{m.group(1)}T{m.group(2)}:00+02:00" if m else None
@@ -219,25 +288,44 @@ def _parse_items(html):
     return out
 
 
-async def _crawl_auction(au, sem):
+async def _crawl_auction(au, sem, context):
     async def page(url):
         async with sem:
             try:
-                return await _bee(url)
+                return await _session_fetch_with_fallback(context, url)
             except Exception as e:
                 logger.warning("PS page failed %s: %s", url, e)
                 return None
     html = await page(f"{au}/sida=1")
     if not html:
-        return []
+        raise RuntimeError(f"Första sidan kunde inte hämtas: {au}")
+
     items = _parse_items(html)
     total = _total_items(html)
+
+    if total is not None and total > MAX_PAGES * PAGE_SIZE:
+        raise RuntimeError(
+            f"Auktionen har {total} objekt, över sidgränsen "
+            f"{MAX_PAGES * PAGE_SIZE}: {au}"
+        )
+
     if total and total > PAGE_SIZE:
-        pages = min((total + PAGE_SIZE - 1) // PAGE_SIZE, MAX_PAGES)
-        rest = await asyncio.gather(*[page(f"{au}/sida={p}") for p in range(2, pages + 1)])
+        pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
+        rest = await asyncio.gather(
+            *[page(f"{au}/sida={p}") for p in range(2, pages + 1)]
+        )
+
+        if any(h is None for h in rest):
+            raise RuntimeError(f"En eller flera undersidor misslyckades: {au}")
+
         for h in rest:
-            if h:
-                items.extend(_parse_items(h))
+            items.extend(_parse_items(h))
+
+    if total is not None and len(items) < total:
+        raise RuntimeError(
+            f"Ofullständig auktion {au}: {len(items)} av {total} objekt"
+        )
+
     return items
 
 
@@ -252,18 +340,55 @@ async def collect():
     else:
         return []  # gated — no network, no credits
     try:
-        index_html = await _bee(INDEX_URL)
+        async with _browser_session() as context:
+            index_html = await _session_fetch_with_fallback(
+                context, INDEX_URL
+            )
+            running = _running_auctions(index_html)
+
+            if not running:
+                logger.warning("PS index returned no running auctions")
+                return []
+
+            if mode == "soon":
+                targets = [
+                    u for s, u in running if s <= SOON_WINDOW
+                ][:MAX_AUCTIONS]
+            else:
+                targets = [u for _, u in running][:MAX_AUCTIONS]
+
+            logger.info(
+                "PS Auction %s pass: %s auctions",
+                mode, len(targets)
+            )
+
+            sem = asyncio.Semaphore(min(CONCURRENCY, 2))
+            outcomes = await asyncio.gather(
+                *[
+                    _crawl_auction(au, sem, context)
+                    for au in targets
+                ],
+                return_exceptions=True,
+            )
+
+            failures = [
+                result for result in outcomes
+                if isinstance(result, BaseException)
+            ]
+            if failures:
+                for error in failures:
+                    logger.warning(
+                        "PS auction crawl failed: %s", error
+                    )
+                raise RuntimeError(
+                    f"{len(failures)} av {len(targets)} auktioner "
+                    "kunde inte hämtas komplett"
+                )
+
+            chunks = outcomes
     except Exception as e:
-        logger.warning("PS index fetch failed: %s", e)
+        logger.warning("PS collection failed: %s", e)
         return []
-    running = _running_auctions(index_html)
-    if mode == "soon":
-        targets = [u for s, u in running if s <= SOON_WINDOW][:MAX_AUCTIONS]
-    else:
-        targets = [u for _, u in running][:MAX_AUCTIONS]
-    logger.info("PS Auction %s pass: %s auctions", mode, len(targets))
-    sem = asyncio.Semaphore(CONCURRENCY)
-    chunks = await asyncio.gather(*[_crawl_auction(au, sem) for au in targets])
     results, seen = [], set()
     for ch in chunks:
         for it in ch:
@@ -271,8 +396,15 @@ async def collect():
                 continue
             seen.add(it["url"])
             results.append(it)
-        if len(results) >= MAX_ITEMS:
-            break
+
+    if len(results) > MAX_ITEMS:
+        logger.warning(
+            "PS collection exceeds MAX_ITEMS: %s > %s; "
+            "refusing to mark the crawl complete",
+            len(results), MAX_ITEMS,
+        )
+        return []
+
     # Only arm the time-gate after a successful crawl, so an interrupted run
     # retries instead of locking out for the full interval.
     if mode == "soon":
@@ -285,33 +417,51 @@ async def collect():
 
 
 async def refresh_item(url):
-    """Fetch a single PS Auction item page via ScrapingBee and parse its live
-    bid / bid count / end time. Returns a dict (current_bid, bid_count, ends_at)
-    or None if the item can't be read or has ended. Used for on-demand refresh
-    of watched items between the heavy time-gated discovery passes."""
+    """Refresh a single PS Auction item using local Chromium."""
     html = None
-    for attempt in range(2):  # ScrapingBee 500s are often transient
+
+    for attempt in range(2):
         try:
-            html = await _bee(url)
+            async with _browser_session() as context:
+                html = await _session_fetch_with_fallback(
+                    context, url
+                )
             break
         except Exception as e:
-            logger.warning("PS refresh_item failed %s (try %s): %s", url, attempt + 1, e)
-            await asyncio.sleep(3)
+            logger.warning(
+                "PS refresh_item failed %s (try %s): %s",
+                url, attempt + 1, e
+            )
+            if attempt == 0:
+                await asyncio.sleep(3)
+
     if not html:
         return None
+
     txt = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
-    # The leading bid is clearly labelled "Ledande bud <amount> SEK" (fall back
-    # to "Högsta bud <amount>"). Anchor on the label so we never grab an
-    # adjacent item's figure.
-    bm = (re.search(r"Ledande bud\s*([\d\s\u00a0]+?)\s*SEK", txt)
-          or re.search(r"Högsta bud\s*([\d\s\u00a0]+?)\s", txt))
+
+    bm = (
+        re.search(
+            r"Ledande bud\s*([\d\s\u00a0]+?)\s*SEK",
+            txt
+        )
+        or re.search(
+            r"Högsta bud\s*([\d\s\u00a0]+?)\s*SEK",
+            txt
+        )
+    )
+
     if not bm:
         return None
-    bid = int(bm.group(1).replace("\u00a0", "").replace(" ", ""))
-    if bid <= 0:
-        return None
+
+    bid = int(
+        bm.group(1).replace("\u00a0", "").replace(" ", "")
+    )
+
     res = {"current_bid": bid}
+
     cm = re.search(r"(\d+)\s*bud\b", txt)
     if cm:
         res["bid_count"] = int(cm.group(1))
+
     return res
