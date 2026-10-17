@@ -48,6 +48,8 @@ _TIME_RE = re.compile(r"\d+[DdHhMm]")
 
 _last_full = 0.0
 _last_soon = 0.0
+_last_attempt = 0.0
+RETRY_INTERVAL = int(os.environ.get("PS_RETRY_INTERVAL_H", "6")) * 3600
 
 # Budget gate timestamps live in MongoDB (collection `crawler_state`, _id
 # "ps_auction") so the 72h/24h crawl cadence survives pod restarts/redeploys
@@ -62,7 +64,7 @@ def set_db(db):
 
 
 async def _load_state():
-    global _last_full, _last_soon
+    global _last_full, _last_soon, _last_attempt
     if _db is None:
         return
     try:
@@ -70,6 +72,7 @@ async def _load_state():
         if doc:
             _last_full = float(doc.get("last_full", 0))
             _last_soon = float(doc.get("last_soon", 0))
+            _last_attempt = float(doc.get("last_attempt", 0))
     except Exception:
         logger.exception("PS state load failed")
 
@@ -80,7 +83,11 @@ async def _save_state():
     try:
         await _db.crawler_state.update_one(
             {"_id": _STATE_ID},
-            {"$set": {"last_full": _last_full, "last_soon": _last_soon}},
+            {"$set": {
+                "last_full": _last_full,
+                "last_soon": _last_soon,
+                "last_attempt": _last_attempt,
+            }},
             upsert=True,
         )
     except Exception:
@@ -333,12 +340,20 @@ async def collect():
     """Budget-aware, time-gated PS Auction crawl. Returns item records (maybe [])."""
     global _last_full, _last_soon
     now = time.time()
+    global _last_attempt
+
     if now - _last_full >= FULL_INTERVAL:
         mode = "full"
     elif now - _last_soon >= SOON_INTERVAL:
         mode = "soon"
     else:
         return []  # gated — no network, no credits
+
+    if now - _last_attempt < RETRY_INTERVAL:
+        return []
+    _last_attempt = now
+    await _save_state()
+
     try:
         async with _browser_session() as context:
             index_html = await _session_fetch_with_fallback(
@@ -372,20 +387,28 @@ async def collect():
             )
 
             failures = [
-                result for result in outcomes
+                (url, result)
+                for url, result in zip(targets, outcomes)
                 if isinstance(result, BaseException)
             ]
-            if failures:
-                for error in failures:
-                    logger.warning(
-                        "PS auction crawl failed: %s", error
-                    )
-                raise RuntimeError(
-                    f"{len(failures)} av {len(targets)} auktioner "
-                    "kunde inte hämtas komplett"
+
+            for url, error in failures:
+                logger.warning(
+                    "PS auction crawl failed %s: %s", url, error
                 )
 
-            chunks = outcomes
+            chunks = [
+                result for result in outcomes
+                if not isinstance(result, BaseException)
+            ]
+
+            complete = not failures
+
+            if failures:
+                logger.warning(
+                    "PS partial collection: %s/%s auctions succeeded",
+                    len(chunks), len(targets),
+                )
     except Exception as e:
         logger.warning("PS collection failed: %s", e)
         return []
@@ -405,13 +428,19 @@ async def collect():
         )
         return []
 
-    # Only arm the time-gate after a successful crawl, so an interrupted run
-    # retries instead of locking out for the full interval.
-    if mode == "soon":
-        _last_soon = now
+    # Only arm the time-gate after a completely successful crawl.
+    # Partial results can still be saved by the caller.
+    if complete:
+        if mode == "soon":
+            _last_soon = now
+        else:
+            _last_full = _last_soon = now
+        await _save_state()
     else:
-        _last_full = _last_soon = now
-    await _save_state()
+        logger.warning(
+            "PS partial results returned without advancing crawl gate"
+        )
+
     return results[:MAX_ITEMS]
 
 
