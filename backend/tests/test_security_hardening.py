@@ -47,7 +47,7 @@ class TestLiveFeedNormal:
     def test_live_feed_no_q_returns_items(self):
         r = requests.get(f"{API}/live/auctions", timeout=30)
         assert r.status_code == 200
-        data = r.json()
+        data = r.json()["items"]
         assert isinstance(data, list)
         assert len(data) > 0, "live feed empty"
         # Tradera/Blocket must NOT appear in default (no q) feed
@@ -59,7 +59,7 @@ class TestLiveFeedNormal:
         from datetime import datetime
         r = requests.get(f"{API}/live/auctions?limit=30", timeout=30)
         assert r.status_code == 200
-        data = r.json()
+        data = r.json()["items"]
 
         def parse(s):
             if not s:
@@ -76,7 +76,7 @@ class TestLiveFeedNormal:
     def test_live_feed_source_filter(self):
         r = requests.get(f"{API}/live/auctions?source=Klaravik", timeout=30)
         assert r.status_code == 200
-        for d in r.json():
+        for d in r.json()["items"]:
             assert d.get("source") == "Klaravik"
 
     def test_normal_polling_not_rate_limited(self):
@@ -93,7 +93,7 @@ class TestSearch:
         assert r.status_code in (200, 429)
         if r.status_code == 429:
             pytest.skip("rate limited by concurrent run")
-        data = r.json()
+        data = r.json()["items"]
         assert isinstance(data, list)
         # Should match something; many sources carry 'cykel'
         assert len(data) > 0
@@ -104,7 +104,7 @@ class TestSearch:
         assert r.status_code in (200, 429)
         if r.status_code == 429:
             pytest.skip("rate limited")
-        data = r.json()
+        data = r.json()["items"]
         # If Blocket present, every Blocket item title must contain 'moped'
         blocket_items = [d for d in data if d.get("source") == "Blocket"]
         for d in blocket_items:
@@ -140,7 +140,7 @@ class TestDeviceIdentity:
 def live_item_url():
     r = requests.get(f"{API}/live/auctions?limit=20", timeout=30)
     assert r.status_code == 200
-    items = r.json()
+    items = r.json()["items"]
     # Choose any item with a url
     for it in items:
         if it.get("url"):
@@ -259,33 +259,17 @@ class TestBOLA:
 
 # ---------- 6. SSRF protection ----------
 class TestSSRF:
-    def test_metadata_blocked(self):
-        r = requests.post(f"{API}/scrape/preview",
-                          json={"url": "http://169.254.169.254/latest/meta-data/"},
-                          timeout=30)
-        assert r.status_code == 200
-        data = r.json()
-        assert data.get("scraped") is False
-        # Should NOT contain cloud metadata leakage
-        body = str(data).lower()
-        assert "ami-id" not in body
-        assert "iam" not in body or "iamuser" not in body
+    @pytest.mark.parametrize("url", [
+        "http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:8001/",
+    ])
+    def test_internal_urls_rejected(self, url):
+        r = requests.post(f"{API}/scrape/preview", json={"url": url}, timeout=30)
+        assert r.status_code == 422
 
-    def test_loopback_blocked(self):
-        r = requests.post(f"{API}/scrape/preview",
-                          json={"url": "http://127.0.0.1:8001/"},
-                          timeout=30)
-        assert r.status_code == 200
-        assert r.json().get("scraped") is False
-
-    def test_public_url_still_works(self):
-        # A benign public URL; even if parsing fails, must return 200
-        r = requests.post(f"{API}/scrape/preview",
-                          json={"url": "https://example.com/"},
-                          timeout=30)
-        assert r.status_code == 200
-        # scraped flag may be False (no auction fields), but server must not SSRF-error
-        assert "source" in r.json()
+    def test_non_auction_returns_error_instead_of_fake_data(self):
+        r = requests.post(f"{API}/scrape/preview", json={"url": "https://example.com/"}, timeout=30)
+        assert r.status_code == 422
+        assert "detail" in r.json()
 
 
 # ---------- 7. Rate limiting on bursty search ----------

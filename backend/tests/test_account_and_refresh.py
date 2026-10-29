@@ -179,24 +179,12 @@ class TestRefreshAndAnalyze:
             assert not (abs(bf - naive) < 1 and bf == naive), f"buyer_fee looks like naive 10% ({bf})"
         print(f"refresh ok: source={source} bid={cb} fee={bf} total={tn}")
 
-    def test_refresh_missing_url_returns_400(self):
-        """Insert an auction doc with no url via create (keyword only) and refresh it."""
-        did = f"qa-nourl-{uuid.uuid4().hex[:8]}"
-        s = _sess(did)
-        # keyword-only create (no url) -> scrape_auction yields item without url
+    def test_keyword_only_create_is_rejected(self):
+        """A keyword must not create a fabricated watch without an auction URL."""
+        s = _sess(f"qa-nourl-{uuid.uuid4().hex[:8]}")
         r = s.post(f"{BASE_URL}/api/auctions", json={"keyword": "cykel"})
-        if r.status_code != 200:
-            pytest.skip(f"keyword-only create not supported: {r.status_code} {r.text[:200]}")
-        aid = r.json().get("id")
-        got_url = r.json().get("url") or ""
-        if got_url:
-            pytest.skip("keyword create returned a url; cannot test missing-url branch")
-        r = s.post(f"{BASE_URL}/api/auctions/{aid}/refresh")
-        assert r.status_code == 400, r.text
-        try:
-            s.delete(f"{BASE_URL}/api/auctions/{aid}")
-        except Exception:
-            pass
+        assert r.status_code == 422, r.text
+        assert s.get(f"{BASE_URL}/api/auctions").json() == []
 
     def test_live_analyze_returns_valuation(self):
         did = f"qa-ana-{uuid.uuid4().hex[:8]}"

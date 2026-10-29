@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Link2, Search, Loader2, Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -9,20 +8,16 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { CATEGORIES } from "@/lib/sources";
 
 export const AddAuctionModal = ({ open, onOpenChange, onSubmit, submitting }) => {
-  const [tab, setTab] = useState("url");
   const [url, setUrl] = useState("");
-  const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("Övrigt");
 
   const handleSubmit = async () => {
-    const payload = { category };
-    if (tab === "url") payload.url = url.trim();
-    else payload.keyword = keyword.trim();
+    const payload = { category, url: url.trim() };
     const ok = await onSubmit(payload);
-    if (ok) { setUrl(""); setKeyword(""); }
+    if (ok) setUrl("");
   };
 
-  const disabled = submitting || (tab === "url" ? !url.trim() : !keyword.trim());
+  const disabled = submitting || !url.trim();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -30,21 +25,11 @@ export const AddAuctionModal = ({ open, onOpenChange, onSubmit, submitting }) =>
         <DialogHeader>
           <DialogTitle className="font-heading text-xl">Bevaka ny auktion</DialogTitle>
           <DialogDescription className="text-slate-400">
-            Klistra in en länk från PS Auction, Klaravik, Blinto m.fl. – eller sök på nyckelord.
+            Klistra in en auktionslänk. För att söka efter annonser använder du sökfältet i live-flödet.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={setTab} className="mt-2">
-          <TabsList className="grid w-full grid-cols-2 bg-slate-800/60">
-            <TabsTrigger value="url" data-testid="tab-url" className="data-[state=active]:bg-amber-500 data-[state=active]:text-slate-950">
-              <Link2 className="mr-1.5 h-4 w-4" /> Via URL
-            </TabsTrigger>
-            <TabsTrigger value="keyword" data-testid="tab-keyword" className="data-[state=active]:bg-amber-500 data-[state=active]:text-slate-950">
-              <Search className="mr-1.5 h-4 w-4" /> Via sökord
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="url" className="mt-4 space-y-2">
+        <div className="mt-4 space-y-2">
             <Label className="text-slate-300">Auktions-URL</Label>
             <Input
               value={url}
@@ -53,19 +38,7 @@ export const AddAuctionModal = ({ open, onOpenChange, onSubmit, submitting }) =>
               data-testid="input-url"
               className="border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-600"
             />
-          </TabsContent>
-
-          <TabsContent value="keyword" className="mt-4 space-y-2">
-            <Label className="text-slate-300">Sökord</Label>
-            <Input
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="t.ex. Grävmaskin Volvo EC220"
-              data-testid="input-keyword"
-              className="border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-600"
-            />
-          </TabsContent>
-        </Tabs>
+        </div>
 
         <div className="mt-2 space-y-2">
           <Label className="text-slate-300">Kategori</Label>

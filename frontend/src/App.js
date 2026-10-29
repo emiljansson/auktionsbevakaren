@@ -1,3 +1,4 @@
+import { ChatGPTConnection } from "@/components/ChatGPTConnection";
 import { useEffect, useState, useCallback } from "react";
 import "@/App.css";
 import { AnimatePresence, motion } from "framer-motion";
@@ -176,6 +177,7 @@ function App() {
               </p>
             </div>
           </div>
+          <ChatGPTConnection />
           <NotifButton />
           <div className="order-last flex w-full rounded-xl border border-slate-800 bg-[#111827] p-1 sm:order-none sm:w-auto" data-testid="view-toggle">
             <button

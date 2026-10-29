@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
+from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,6 +7,7 @@ import os
 import re
 import asyncio
 import hashlib
+import json
 import logging
 import time
 import uuid
@@ -26,6 +28,7 @@ import tradera
 import blocket
 import auctionet
 import commhub
+from chatgpt_auth import ChatGPTService, ChatGPTError
 from fastapi import Header
 from crawler import Crawler, compute_fees, exp_fee_incl
 
@@ -34,7 +37,23 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 crawler = Crawler(db)
 
+CHATGPT_LOCAL_ENABLED = os.environ.get("CHATGPT_LOCAL_ENABLED", "false").lower() == "true"
+chatgpt = ChatGPTService(os.environ.get("CHATGPT_STORAGE_DIR", str(ROOT_DIR / ".chatgpt")))
+
 app = FastAPI(title="Auktiomera API")
+
+
+@app.middleware("http")
+async def protect_chatgpt_callback(request, call_next):
+    if request.url.path == "/api/chatgpt/callback":
+        request.state.oauth_params = dict(request.query_params)
+        request.scope["query_string"] = b""  # Keep OAuth codes out of access logs.
+    response = await call_next(request)
+    if request.url.path.startswith("/api/chatgpt/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
 api_router = APIRouter(prefix="/api")
 
 logger = logging.getLogger("auktion")
@@ -210,13 +229,14 @@ def _category(title: str):
     return None
 
 
-async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8):
+async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8, device_id: str = None):
     """Find real sold auctions that match `title` NARROWLY. We text-search a broad
     candidate pool, then require each candidate to share the exact model code
     (or the brand when no model code exists), so 'Lastbil med schaktflak 8x4
     SCANIA R730' only matches other SCANIA R730 trucks — never every lastbil."""
     if not title or not title.strip():
         return []
+    excluded = await db.comparable_exclusions.find({"device_id": device_id}, {"_id": 0}).to_list(1000) if device_id else []
     model, brand, weak = _key_tokens(title)
     terms = model + brand + weak
     search = " ".join(terms) if terms else title
@@ -230,6 +250,17 @@ async def _find_comps(title: str, source: Optional[str] = None, limit: int = 8):
     except Exception:
         logger.exception("find_comps failed")
         return []
+    def is_excluded(candidate):
+        for exclusion in excluded:
+            if exclusion.get("url"):
+                if exclusion["url"] == candidate.get("url"):
+                    return True
+            elif exclusion.get("title") == candidate.get("title"):
+                if not exclusion.get("source") or exclusion["source"] == candidate.get("source"):
+                    return True
+        return False
+
+    cands = [c for c in cands if not is_excluded(c)]
     if not model and not brand:
         qcat0 = _category(title)
         if qcat0:
@@ -499,7 +530,10 @@ async def scrape_preview(payload: WatchCreate, request: Request):
     _rate_limit(request, "scrape", 20, 60)
     if not payload.url and not payload.keyword:
         raise HTTPException(status_code=400, detail="Ange en URL eller ett sökord.")
-    data = await asyncio.to_thread(scraper.scrape_auction, payload.url, payload.keyword)
+    try:
+        data = await asyncio.to_thread(scraper.scrape_auction, payload.url, payload.keyword)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return data
 
 
@@ -591,7 +625,10 @@ async def create_auction(payload: WatchCreate, request: Request, device_id: str 
     _rate_limit(request, "scrape", 20, 60)
     if not payload.url and not payload.keyword:
         raise HTTPException(status_code=400, detail="Ange en URL eller ett sökord.")
-    data = await asyncio.to_thread(scraper.scrape_auction, payload.url, payload.keyword)
+    try:
+        data = await asyncio.to_thread(scraper.scrape_auction, payload.url, payload.keyword)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     history = scraper.generate_bid_history(data["current_bid"], data["bid_count"])
     auction = Auction(
         source=data["source"],
@@ -602,26 +639,36 @@ async def create_auction(payload: WatchCreate, request: Request, device_id: str 
         bid_count=data["bid_count"],
         vat=data["vat"],
         buyer_fee=data["buyer_fee"],
+        buyer_fee_excl=data.get("buyer_fee_excl"),
+        fee_known=data.get("fee_known", False), fee_note=data.get("fee_note"),
         total_now=data["total_now"],
         ends_at=data.get("ends_at"),
         url=data.get("url", ""),
         scraped=data.get("scraped", False),
         bid_history=history,
     )
-    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id})
+    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id, "notified_bid": auction.current_bid})
     return auction
 
 
-async def _run_valuation(doc) -> dict:
+async def _run_valuation(doc, device_id=None) -> dict:
     """Shared AI valuation used by both analyze endpoints: ingest Auctionet real
     sold prices, find comps, run the LLM. Raises HTTPException(502) on failure."""
     try:
+        use_chatgpt = CHATGPT_LOCAL_ENABLED and chatgpt.connected(device_id)
+        if CHATGPT_LOCAL_ENABLED and not use_chatgpt:
+            raise ChatGPTError("Anslut ditt ChatGPT-konto via ChatGPT-knappen i sidhuvudet för att göra AI-värderingar.")
+        if not use_chatgpt:
+            valuation.require_configured()
         await _ingest_auctionet_sold(doc["title"])
-        comps = await _find_comps(doc["title"], doc["source"])
+        comps = await _find_comps(doc["title"], doc["source"], device_id=device_id)
         return await valuation.valuate(
             doc["title"], doc.get("current_bid") or 0, doc["source"],
             doc.get("total_now") or doc.get("current_bid") or 0, comps,
+            complete=(lambda instructions, prompt: chatgpt.complete(device_id, instructions, prompt)) if use_chatgpt else None,
         )
+    except (valuation.ValuationUnavailable, ChatGPTError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception:
@@ -631,12 +678,14 @@ async def _run_valuation(doc) -> dict:
 
 @api_router.post("/auctions/{auction_id}/analyze", response_model=Auction)
 async def analyze_auction(auction_id: str, request: Request, device_id: str = Depends(require_device)):
+    if CHATGPT_LOCAL_ENABLED and chatgpt.connected(device_id):
+        _require_local_chatgpt(request)
     _rate_limit(request, "analyze", 30, 60)
     doc = await db.auctions.find_one({"id": auction_id, "device_id": device_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Bevakning hittades inte.")
     doc = _clean(doc)
-    val = await _run_valuation(doc)
+    val = await _run_valuation(doc, device_id)
     now = datetime.now(timezone.utc).isoformat()
     await db.auctions.update_one(
         {"id": auction_id}, {"$set": {"valuation": val, "updated_at": now}}
@@ -655,9 +704,28 @@ async def refresh_auction(auction_id: str, request: Request, device_id: str = De
     doc = _clean(doc)
     if not doc.get("url"):
         raise HTTPException(status_code=400, detail="Objektet saknar länk och kan inte uppdateras.")
-    data = await asyncio.to_thread(scraper.scrape_auction, doc["url"], None)
-    new_bid = max(doc["current_bid"], data["current_bid"])
-    f = compute_fees(doc["source"], new_bid, doc)
+    try:
+        data = await _fetch_item_refresh(doc["source"], doc["url"])
+    except Exception as exc:
+        logger.exception("manual refresh failed")
+        raise HTTPException(status_code=502, detail="Kunde inte uppdatera auktionssidan.") from exc
+    if not data:
+        try:
+            data = await asyncio.to_thread(scraper.scrape_auction, doc["url"], None)
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    new_bid = data.get("current_bid")
+    if new_bid is None:
+        new_bid = doc["current_bid"]
+    new_bid = max(doc["current_bid"], new_bid)
+    live = await db.live_auctions.find_one({"url": doc["url"]}) or {}
+    ctx = {**live.get("fee_inputs", {})}
+    ctx.setdefault("fee_excl", doc.get("buyer_fee_excl"))
+    ctx["vat"] = doc.get("vat", 25)
+    for key in ("vat", "fee_excl", "fee_vat", "fee_pct", "fee_min", "fee_max", "starting_price"):
+        if data.get(key) is not None:
+            ctx[key] = data[key]
+    f = compute_fees(doc["source"], new_bid, ctx)
     buyer_fee, total_now = f["buyer_fee"], f["total_now"]
     now = datetime.now(timezone.utc).isoformat()
     history = doc.get("bid_history", [])
@@ -666,14 +734,20 @@ async def refresh_auction(auction_id: str, request: Request, device_id: str = De
             "timestamp": now, "bid": new_bid, "bidder": "Ny budgivare",
             "increment": new_bid - doc["current_bid"],
         }]
-    bid_count = doc.get("bid_count", 0) + (1 if new_bid > doc["current_bid"] else 0)
+    bid_count = data.get("bid_count")
+    if bid_count is None:
+        bid_count = doc.get("bid_count", 0)
     changes = {
         "current_bid": new_bid, "buyer_fee": buyer_fee,
         "buyer_fee_excl": f["buyer_fee_excl"], "fee_known": f["fee_known"],
         "fee_note": f["fee_note"], "vat": f["vat"], "total_now": total_now,
         "bid_count": bid_count, "bid_history": history, "updated_at": now,
     }
-    await db.auctions.update_one({"id": auction_id}, {"$set": changes})
+    if data.get("ends_at"):
+        changes["ends_at"] = data["ends_at"]
+    await db.auctions.update_one({"id": auction_id, "device_id": device_id}, {"$set": changes})
+    if live:
+        await db.live_auctions.update_one({"url": doc["url"]}, {"$set": {k: v for k, v in changes.items() if k != "bid_history"}})
     doc.update(changes)
     return Auction(**doc)
 
@@ -730,10 +804,40 @@ async def live_status():
     return s
 
 
+def _feed_snapshot_key(snapshot, source, q, page_size):
+    return hashlib.sha256(json.dumps([snapshot, source, q, page_size]).encode()).hexdigest()
+
+
+async def _read_feed_snapshot(key, page):
+    meta = await db.feed_snapshots.find_one({"_id": key})
+    if not meta:
+        return None
+    saved = await db.feed_snapshots.find_one({"_id": f"{key}|{page}"})
+    items = (saved or {}).get("items", [])
+    urls = [d["url"] for d in items]
+    current = {d["url"]: d async for d in db.live_auctions.find({"url": {"$in": urls}}, {"_id": 0})} if urls else {}
+    now = datetime.now(timezone.utc)
+    for d in items:
+        latest = current.get(d["url"], {})
+        for field in ("current_bid", "bid_count", "buyer_fee", "buyer_fee_excl", "total_now", "vat", "fee_known", "fee_note", "ends_at"):
+            if latest.get(field) is not None:
+                d[field] = latest[field]
+        end = _parse_iso(d.get("ends_at"))
+        d["ended"] = bool(end and end <= now)
+    return {"items": items, "total": meta["total"], "page": page,
+            "page_size": meta["page_size"], "pages": meta["pages"]}
+
+
 @api_router.get("/live/auctions")
 async def live_auctions(request: Request, source: Optional[str] = None, q: Optional[str] = None, page: int = 1, page_size: int = 100, snapshot: Optional[str] = None):
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
+    snapshot_key = _feed_snapshot_key(snapshot, source, q, page_size) if snapshot else None
+    if snapshot_key:
+        saved = await _read_feed_snapshot(snapshot_key, page)
+        if saved is not None:
+            return saved
+        _rate_limit(request, "feed_snapshot", 30, 60)
     # On search, augment the feed with live Tradera + Blocket results (not background-crawled).
     if q and len((q or "").strip()) >= 2:
         _rate_limit(request, "search", 15, 20)  # block burst searches, keep normal polling free
@@ -832,6 +936,17 @@ async def live_auctions(request: Request, source: Optional[str] = None, q: Optio
             i += 1
         live = merged
     total = len(live)
+    if snapshot_key:
+        created = datetime.now(timezone.utc)
+        pages = max(1, (total + page_size - 1) // page_size)
+        for i in range(pages):
+            await db.feed_snapshots.update_one(
+                {"_id": f"{snapshot_key}|{i + 1}"},
+                {"$setOnInsert": {"items": live[i * page_size:(i + 1) * page_size], "created_at": created}}, upsert=True)
+        await db.feed_snapshots.update_one(
+            {"_id": snapshot_key},
+            {"$setOnInsert": {"total": total, "pages": pages, "page_size": page_size, "created_at": created}}, upsert=True)
+        return await _read_feed_snapshot(snapshot_key, page)
     start = (page - 1) * page_size
     items = live[start:start + page_size]
     return {"items": items, "total": total, "page": page, "page_size": page_size,
@@ -876,29 +991,33 @@ async def watch_live(payload: WatchCreate, device_id: str = Depends(require_devi
         ends_at=doc.get("ends_at"),
         url=doc["url"], scraped=True, bid_history=history,
     )
-    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id})
+    await db.auctions.insert_one({**auction.model_dump(), "device_id": device_id, "notified_bid": auction.current_bid})
     return auction
 
 
 @api_router.post("/live/analyze")
 async def live_analyze(payload: LiveAnalyzeReq, request: Request, device_id: str = Depends(require_device)):
+    if CHATGPT_LOCAL_ENABLED and chatgpt.connected(device_id):
+        _require_local_chatgpt(request)
     """AI valuation for ANY live-feed item (no watch required), grounded on real
     sold prices from our database. Cached on the live doc for 24h to save credits."""
     _rate_limit(request, "analyze", 30, 60)
     doc = await db.live_auctions.find_one({"url": payload.url}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Objektet hittades inte.")
-    cached, vat = doc.get("valuation"), doc.get("valuation_at")
+    cache = await db.device_valuations.find_one({"device_id": device_id, "url": payload.url}) or {}
+    cached, vat = cache.get("valuation"), cache.get("valuation_at")
     if cached and vat:
         try:
             if datetime.now(timezone.utc) - datetime.fromisoformat(vat) < timedelta(hours=24):
                 return {"valuation": cached}
-        except Exception:
+        except ValueError:
             pass
-    val = await _run_valuation(doc)
-    await db.live_auctions.update_one(
-        {"url": payload.url},
+    val = await _run_valuation(doc, device_id)
+    await db.device_valuations.update_one(
+        {"device_id": device_id, "url": payload.url},
         {"$set": {"valuation": val, "valuation_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
     )
     return {"valuation": val}
 
@@ -989,9 +1108,7 @@ async def delete_keyword_watch(wid: str, device_id: str = Depends(require_device
 
 @api_router.delete("/sold-items")
 async def delete_sold_item(payload: DeleteSoldReq, device_id: str = Depends(require_device)):
-    """Remove a bad/mismatched sold reference so it is no longer used as a price
-    comparable in valuations. Prefer the exact url; fall back to title (+source)
-    for legacy comparables cached before url was tracked."""
+    """Exclude a comparable for this device without deleting shared sale history."""
     if payload.url:
         q = {"url": payload.url}
     elif payload.title:
@@ -1000,8 +1117,91 @@ async def delete_sold_item(payload: DeleteSoldReq, device_id: str = Depends(requ
             q["source"] = payload.source
     else:
         raise HTTPException(status_code=400, detail="Saknar identifierare för objektet.")
-    res = await db.sold_items.delete_many(q)
-    return {"ok": True, "deleted": res.deleted_count}
+    await db.comparable_exclusions.update_one(
+        {"device_id": device_id, **q}, {"$set": {"device_id": device_id, **q}}, upsert=True)
+    await db.device_valuations.delete_many({"device_id": device_id})
+    await db.auctions.update_many({"device_id": device_id}, {"$unset": {"valuation": ""}})
+    return {"ok": True, "excluded": True}
+
+
+
+# ChatGPT plan usage is enabled only for this local development installation.
+def _require_local_chatgpt(request):
+    if not CHATGPT_LOCAL_ENABLED:
+        raise HTTPException(status_code=404, detail="ChatGPT-kopplingen är inte aktiverad.")
+    if request.url.hostname not in ("localhost", "127.0.0.1"):
+        raise HTTPException(status_code=403, detail="ChatGPT-kopplingen stöds bara vid lokal körning.")
+    origin = request.headers.get("origin")
+    if origin and origin not in ("http://localhost:3000", "http://127.0.0.1:3000"):
+        raise HTTPException(status_code=403, detail="Otillåtet ursprung för ChatGPT-koppling.")
+
+
+async def _clear_device_valuations(device_id):
+    await db.device_valuations.delete_many({"device_id": device_id})
+    await db.auctions.update_many({"device_id": device_id}, {"$unset": {"valuation": ""}})
+
+
+class ChatGPTSettings(BaseModel):
+    account: Optional[str] = None
+    model: Optional[str] = None
+    welcome_seen: bool = False
+    new_account: bool = False
+
+
+@api_router.get("/chatgpt/status")
+async def chatgpt_status(request: Request, device_id: str = Depends(require_device)):
+    if not CHATGPT_LOCAL_ENABLED:
+        return {"available": False, "connected": False}
+    _require_local_chatgpt(request)
+    return {"available": True, **chatgpt.status(device_id)}
+
+
+@api_router.post("/chatgpt/connect")
+async def chatgpt_connect(payload: ChatGPTSettings, request: Request, device_id: str = Depends(require_device)):
+    _require_local_chatgpt(request)
+    _rate_limit(request, "chatgpt_connect", 10, 60)
+    return {"url": await chatgpt.start(device_id, payload.new_account)}
+
+
+@api_router.get("/chatgpt/callback", response_class=HTMLResponse)
+async def chatgpt_callback(request: Request):
+    _require_local_chatgpt(request)
+    try:
+        device_id = await chatgpt.finish(request.state.oauth_params)
+        await _clear_device_valuations(device_id)
+    except ChatGPTError as exc:
+        import html
+        return HTMLResponse('<!doctype html><meta charset="utf-8"><title>ChatGPT</title><h1>Inloggningen slutfördes inte</h1><p>' + html.escape(str(exc)) + '</p><p>Stäng fliken och försök igen i Auktiomera.</p>', status_code=400)
+    return HTMLResponse('<!doctype html><meta charset="utf-8"><title>ChatGPT anslutet</title><h1>ChatGPT är anslutet</h1><p>Stäng den här fliken och gå tillbaka till Auktiomera för att göra en AI-värdering.</p>')
+
+
+@api_router.post("/chatgpt/settings")
+async def chatgpt_settings(payload: ChatGPTSettings, request: Request, device_id: str = Depends(require_device)):
+    _require_local_chatgpt(request)
+    try:
+        result = await chatgpt.update(device_id, payload.account, payload.model, payload.welcome_seen)
+    except ChatGPTError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.account is not None or payload.model is not None:
+        await _clear_device_valuations(device_id)
+    return {"available": True, **result}
+
+
+@api_router.post("/chatgpt/models")
+async def chatgpt_models(request: Request, device_id: str = Depends(require_device)):
+    _require_local_chatgpt(request)
+    try:
+        return {"available": True, **await chatgpt.refresh_models(device_id)}
+    except ChatGPTError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@api_router.delete("/chatgpt/connection")
+async def chatgpt_disconnect(request: Request, device_id: str = Depends(require_device)):
+    _require_local_chatgpt(request)
+    result = await chatgpt.disconnect(device_id)
+    await _clear_device_valuations(device_id)
+    return result
 
 
 app.include_router(api_router)
@@ -1017,14 +1217,20 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    await db.feed_snapshots.create_index("created_at", expireAfterSeconds=7200)
+    await db.device_valuations.create_index([("device_id", 1), ("url", 1)], unique=True)
+    await db.comparable_exclusions.create_index("device_id")
     await db.live_auctions.create_index("url", unique=True)
     await db.auctions.create_index("device_id")
+    await db.auctions.update_many({"notified_bid": {"$exists": False}},
+                                 [{"$set": {"notified_bid": "$current_bid"}}])
     try:
         await db.auctions.create_index([("device_id", 1), ("url", 1)], unique=True)
     except Exception:
         logger.exception("could not create unique watch index")
     await db.devices.create_index("device_id", unique=True)
     try:
+        await db.push_events.update_many({"status": {"$exists": False}}, {"$set": {"status": "sent"}})
         await db.push_events.create_index("event_id", unique=True)
         # Auto-expire old idempotency claims so the collection stays small.
         await db.push_events.create_index("created_at", expireAfterSeconds=1209600)  # 14 days
@@ -1208,17 +1414,32 @@ async def _dedupe_device_tokens():
 
 
 async def _claim_push(event_id: str) -> bool:
-    """Idempotency gate: atomically claim a push event so the SAME logical
-    notification is sent at most once, even across notifier races, a double-
-    started loop, or multiple backend instances sharing this MongoDB. Returns
-    True only to the single caller that wins the claim. (CommHub has no native
-    tag/collapse/idempotency, so this is enforced server-side.)"""
+    """Lease an event; failed or interrupted deliveries can be retried."""
+    now = datetime.now(timezone.utc)
     try:
-        await db.push_events.insert_one(
-            {"event_id": event_id, "created_at": datetime.now(timezone.utc)})
-        return True
+        result = await db.push_events.update_one(
+            {"event_id": event_id, "status": {"$ne": "sent"},
+             "$or": [{"lease_until": {"$lte": now}}, {"lease_until": {"$exists": False}}]},
+            {"$set": {"status": "sending", "lease_until": now + timedelta(minutes=2)},
+             "$setOnInsert": {"created_at": now}}, upsert=True)
+        return bool(result.modified_count or result.upserted_id)
     except DuplicateKeyError:
         return False
+
+
+async def _send_push(event_id: str, token: str, **payload) -> bool:
+    if not await _claim_push(event_id):
+        event = await db.push_events.find_one({"event_id": event_id})
+        return bool(event and event.get("status") == "sent")
+    try:
+        await commhub.send_to_token(token, **payload)
+    except Exception:
+        await db.push_events.delete_one({"event_id": event_id, "status": "sending"})
+        logger.exception("push delivery failed; will retry")
+        return False
+    await db.push_events.update_one({"event_id": event_id},
+                                    {"$set": {"status": "sent"}, "$unset": {"lease_until": ""}})
+    return True
 
 
 async def _watch_notifier():
@@ -1259,14 +1480,10 @@ async def _watch_notifier():
                     if cur and cur > last:
                         # Idempotent per (token,url,bid): the same device never
                         # gets the same bid twice, even if this write races.
-                        if await _claim_push(f"bid|{token}|{a.get('url')}|{cur}"):
-                            try:
-                                await commhub.send_to_token(
-                                    token, title="💰 Nytt bud",
-                                    body=f"{title}: nytt bud {_fmt_sek(cur)} kr", data=data)
-                            except Exception:
-                                logger.exception("new-bid push failed")
-                        changes["notified_bid"] = cur
+                        if await _send_push(f"bid|{token}|{a.get('url')}|{cur}", token,
+                                            title="💰 Nytt bud",
+                                            body=f"{title}: nytt bud {_fmt_sek(cur)} kr", data=data):
+                            changes["notified_bid"] = cur
 
                     # (2) Multi-step ending alert (prefer the live end time)
                     end = _parse_iso(lv.get("ends_at") or a.get("ends_at"))
@@ -1282,16 +1499,12 @@ async def _watch_notifier():
                             step = None
                         sent = set(a.get("notified_steps", []))
                         if step and step not in sent:
-                            if await _claim_push(f"end|{token}|{a.get('url')}|{step}"):
-                                try:
-                                    await commhub.send_to_token(
-                                        token, title="⏰ Auktion snart slut",
-                                        body=f"{title} {label}", data=data)
-                                except Exception:
-                                    logger.exception("ending push failed")
-                            for s in order[: order.index(step) + 1]:
-                                sent.add(s)
-                            changes["notified_steps"] = list(sent)
+                            if await _send_push(f"end|{token}|{a.get('url')}|{step}", token,
+                                                title="⏰ Auktion snart slut",
+                                                body=f"{title} {label}", data=data):
+                                for s in order[: order.index(step) + 1]:
+                                    sent.add(s)
+                                changes["notified_steps"] = list(sent)
 
                     if changes:
                         await db.auctions.update_one({"_id": a["_id"]}, {"$set": changes})
@@ -1329,13 +1542,11 @@ async def _run_keyword_check(w, now):
             n = len(new)
             body = f"{n} ny{'a' if n != 1 else ''} produkt{'er' if n != 1 else ''} i auktionssystemen"
             sig = hashlib.sha1("|".join(sorted(new)).encode()).hexdigest()[:16]
-            if await _claim_push(f"kw|{token}|{w['id']}|{sig}"):
-                try:
-                    await commhub.send_to_token(
-                        token, title=f"🔎 Nya träffar för '{w['keyword']}'", body=body,
-                        data={"type": "keyword_watch", "keyword_watch_id": w["id"]})
-                except Exception:
-                    logger.exception("keyword push failed")
+            if not await _send_push(f"kw|{token}|{w['id']}|{sig}", token,
+                                    title=f"🔎 Nya träffar för '{w['keyword']}'", body=body,
+                                    data={"type": "keyword_watch", "keyword_watch_id": w["id"]}):
+                return  # Retain unseen URLs so the next check retries this batch.
+
     await db.keyword_watches.update_one({"id": w["id"]}, {"$set": update})
 
 

@@ -43,7 +43,7 @@ def _parse_iso(s):
 def _get(url, **kw):
     r = requests.get(url, timeout=30, **kw)
     assert r.status_code == 200, f"{url} -> {r.status_code} {r.text[:200]}"
-    return r.json()
+    return r.json()["items"]
 
 
 # ---- SORT / STABILITY ----

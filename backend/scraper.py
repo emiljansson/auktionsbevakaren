@@ -1,15 +1,14 @@
 """Best-effort real web scraping for Swedish auction sites.
 
 Attempts to fetch and parse an auction page using Open Graph tags, JSON-LD
-and Swedish price heuristics. When a site blocks the request or data cannot be
-found, a realistic fallback record is produced and flagged scraped=False.
+and Swedish price heuristics. When a site blocks the request or required data cannot be
+found, an error is returned instead of inventing auction data.
 """
 import re
 import json
-import random
 import socket
 import ipaddress
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from urllib.parse import urlparse, urljoin
 
 import httpx
@@ -35,11 +34,6 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-FALLBACK_IMAGES = [
-    "https://images.unsplash.com/photo-1603816885871-c122a9ff8d40?crop=entropy&cs=srgb&fm=jpg&q=85&w=800",
-    "https://images.unsplash.com/photo-1603814929877-d5d927322656?crop=entropy&cs=srgb&fm=jpg&q=85&w=800",
-    "https://images.unsplash.com/photo-1603814744450-36f978490b11?crop=entropy&cs=srgb&fm=jpg&q=85&w=800",
-]
 
 
 def detect_source(url: str) -> str:
@@ -95,14 +89,14 @@ def _extract(url: str, html: str) -> dict:
     price = None
     offers = jsonld.get("offers") if isinstance(jsonld, dict) else None
     if isinstance(offers, dict):
-        price = offers.get("price") or offers.get("highPrice")
-    if price:
+        price = offers.get("price") if offers.get("price") is not None else offers.get("highPrice")
+    if price is not None:
         price = _parse_price(str(price))
 
-    if not price:
+    if price is None:
         price = _parse_price(meta("product:price:amount") or "")
 
-    if not price:
+    if price is None:
         body_text = soup.get_text(" ", strip=True)
         m = re.search(r"(?:bud|pris|utrop)[^0-9]{0,20}(\d[\d\s\.\u00a0]{2,})\s*(?:kr|sek)", body_text, re.I)
         if m:
@@ -119,46 +113,21 @@ def _extract(url: str, html: str) -> dict:
         "image": image,
         "current_bid": price,
         "bid_count": bid_count,
-    }
-
-
-def _fallback(url: str, source: str, keyword: str = None) -> dict:
-    sample_titles = [
-        "Milwaukee M18 verktygspaket", "Volvo EC220 Grävmaskin", "Husqvarna Åkgräsklippare",
-        "Makita Slagborrmaskin set", "Kontorsstol Herman Miller", "Släpvagn 750 kg obromsad",
-        "iPhone 15 Pro 256GB", "Dell Latitude bärbar dator", "Pallyft 2500 kg",
-    ]
-    title = keyword or random.choice(sample_titles)
-    bid = random.choice([1200, 2400, 3200, 5800, 9500, 14500, 42000])
-    return {
-        "title": title,
-        "image": random.choice(FALLBACK_IMAGES),
-        "current_bid": bid,
-        "bid_count": random.randint(3, 28),
+        "ends_at": jsonld.get("endDate") or (offers.get("availabilityEnds") if isinstance(offers, dict) else None),
     }
 
 
 def _build_record(url: str, data: dict, scraped: bool) -> dict:
-    source = detect_source(url) if url else data.get("source", "Okänd källa")
-    current_bid = data.get("current_bid") or random.choice([1500, 3200, 7800, 12500])
-    bid_count = data.get("bid_count") or random.randint(2, 20)
-    vat = 25
-    buyer_fee = round(current_bid * 0.10)
-    total_now = round(current_bid * (1 + vat / 100) + buyer_fee)
-    ends_at = (datetime.now(timezone.utc) + timedelta(hours=random.randint(2, 96))).isoformat()
+    from crawler import compute_fees
+    source = detect_source(url)
+    bid = data.get("current_bid")
+    if not data.get("title") or bid is None:
+        raise ValueError("Kunde inte läsa objektets titel och pris. Prova länken i live-flödet.")
+    fees = compute_fees(source, bid, data)
     return {
-        "source": source,
-        "title": data.get("title") or "Auktionsobjekt",
-        "image": data.get("image") or random.choice(FALLBACK_IMAGES),
-        "current_bid": current_bid,
-        "bid_count": bid_count,
-        "currency": "SEK",
-        "vat": vat,
-        "buyer_fee": buyer_fee,
-        "total_now": total_now,
-        "ends_at": ends_at,
-        "url": url or "",
-        "scraped": scraped,
+        **data, **fees, "source": source, "current_bid": bid,
+        "bid_count": data.get("bid_count") or 0, "currency": "SEK",
+        "ends_at": data.get("ends_at"), "url": url, "scraped": scraped,
     }
 
 
@@ -187,14 +156,11 @@ def _assert_public_url(url: str):
 def scrape_auction(url: str = None, keyword: str = None) -> dict:
     """Synchronous scrape. Returns a normalised auction record."""
     if not url:
-        source = "Okänd källa"
-        return _build_record("", {**_fallback("", source, keyword), "source": source}, False)
-
-    source = detect_source(url)
+        raise ValueError("Ange en auktionslänk. Använd live-flödet för att söka efter annonser.")
     try:
         with httpx.Client(headers=HEADERS, timeout=12, follow_redirects=False) as c:
             cur, resp = url, None
-            for _ in range(4):  # validate the target and every redirect hop
+            for _ in range(4):
                 _assert_public_url(cur)
                 r = c.get(cur)
                 loc = r.headers.get("location")
@@ -204,44 +170,16 @@ def scrape_auction(url: str = None, keyword: str = None) -> dict:
                 resp = r
                 break
             if resp is None:
-                raise ValueError("too many redirects")
+                raise ValueError("För många omdirigeringar.")
             resp.raise_for_status()
-            data = _extract(cur, resp.text)
-            has_core = data.get("title") and data.get("current_bid")
-            if has_core:
-                return _build_record(url, data, True)
-            # Partial scrape: keep what we found, fill the rest.
-            fb = _fallback(url, source, keyword)
-            merged = {k: (data.get(k) or fb.get(k)) for k in fb}
-            return _build_record(url, merged, bool(data.get("title")))
-    except Exception:
-        return _build_record(url, _fallback(url, source, keyword), False)
+            return _build_record(url, _extract(cur, resp.text), True)
+    except (httpx.HTTPError, OSError) as exc:
+        raise ValueError("Kunde inte hämta auktionssidan. Försök igen senare.") from exc
 
 
 def generate_bid_history(current_bid: int, bid_count: int, created_at: str = None) -> list:
-    """Generate an ascending bid history ending at current_bid.
-
-    Real auction sites rarely expose full bid logs via simple scraping, so this
-    reconstructs a plausible curve from the known bid count and current bid.
-    """
-    n = max(2, min(bid_count or 6, 40))
-    start = max(1, int(current_bid * random.uniform(0.25, 0.45)))
-    now = datetime.now(timezone.utc)
-    span_hours = random.randint(24, 120)
-    bidders = [f"Budgivare #{i}" for i in range(1, 9)]
-    points = []
-    prev = start
-    for i in range(n):
-        frac = i / (n - 1)
-        val = int(start + (current_bid - start) * (frac ** random.uniform(0.8, 1.3)))
-        val = max(prev, val)
-        prev = val
-        ts = now - timedelta(hours=span_hours * (1 - frac))
-        points.append({
-            "timestamp": ts.isoformat(),
-            "bid": val if i < n - 1 else current_bid,
-            "bidder": random.choice(bidders),
-            "increment": max(0, val - (points[-1]["bid"] if points else start)),
-        })
-    points[-1]["bid"] = current_bid
-    return points
+    """Only the current observation is known; never fabricate historical bids."""
+    if not current_bid:
+        return []
+    return [{"timestamp": created_at or datetime.now(timezone.utc).isoformat(),
+             "bid": current_bid}]

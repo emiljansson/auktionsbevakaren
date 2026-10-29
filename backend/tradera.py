@@ -10,6 +10,7 @@ import re
 import time
 import logging
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 from bs4 import BeautifulSoup
@@ -36,10 +37,10 @@ def _parse_end(s):
     day, mon, hh, mm = int(m.group(1)), _MONTHS.get(m.group(2)[:3].lower()), int(m.group(3)), int(m.group(4))
     if not mon:
         return None
-    now = datetime.now(timezone(timedelta(hours=2)))
+    now = datetime.now(ZoneInfo("Europe/Stockholm"))
     year = now.year
     try:
-        dt = datetime(year, mon, day, hh, mm, tzinfo=timezone(timedelta(hours=2)))
+        dt = datetime(year, mon, day, hh, mm, tzinfo=ZoneInfo("Europe/Stockholm"))
     except ValueError:
         return None
     if dt < now - timedelta(days=1):
@@ -151,10 +152,8 @@ async def search(q, max_items=150):
     try:
         async with httpx.AsyncClient(headers=HEADERS, timeout=20, follow_redirects=True) as c:
             for page in range(1, 4):
-                url = f"{BASE}/search?q={httpx.QueryParams({'x': q})['x']}&page={page}"
-                r = await c.get(url)
-                if r.status_code != 200:
-                    break
+                r = await c.get(f"{BASE}/search", params={"q": q, "page": page})
+                r.raise_for_status()
                 page_items = _parse_page(r.text)
                 new = 0
                 for it in page_items:

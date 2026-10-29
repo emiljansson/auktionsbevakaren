@@ -298,6 +298,13 @@ CRAWL_INTERVAL_SECONDS=10   # valfri, default 10
 REACT_APP_BACKEND_URL=...   # extern backend-URL (ändra ej)
 ```
 
+Vid lokal Docker-körning läser backend variabler från `backend/.env`.
+Kopiera `backend/env.example` till `backend/.env` och fyll i din
+`EMERGENT_LLM_KEY` för AI-värdering. OpenAI-modellen används via Emergent;
+en separat `OPENAI_API_KEY` används inte av den nuvarande integrationen.
+Efter en nyckeländring behöver containern återskapas:
+`docker compose up -d --no-deps --force-recreate backend`.
+
 > Inga default-/fallback-värden i koden – saknad konfiguration ska fela tidigt.
 > Lägg aldrig hemligheter i frontend-bundeln (endast Firebas publika web-config).
 
@@ -336,3 +343,24 @@ curl -s "$API/api/live/auctions?page=1&page_size=100"
 
 *Språk: svenska. Öppen app – ingen inloggning krävs för att titta och söka;
 push + PWA-installation krävs endast för bevakning.*
+
+
+## ChatGPT-koppling vid lokal utveckling
+
+Öppna **ChatGPT** i sidhuvudet på `http://localhost:3000` och välj
+**Continue with ChatGPT**. Logga in hos OpenAI och godkänn användning av din
+ChatGPT-plan. Ett berättigat Plus- eller Pro-konto krävs. Inloggningen återvänder
+till `http://127.0.0.1:8000/api/chatgpt/callback`; backend måste därför köras
+på samma dator som webbläsaren. Ingen API-nyckel behövs för denna koppling.
+
+Välj konto och modell i ChatGPT-panelen. I den lokala Compose-installationen krävs
+en ChatGPT-inloggning för AI-värdering, som använder det valda kontots plan. Användning och frånkoppling hanteras
+även i ChatGPT-inställningarna. OpenAI:s officiella flöde beskrivs här:
+https://developers.openai.com/siwc/token-sharing-open-source
+
+OAuth-uppgifterna lagras endast i backend, i Docker-volymen `chatgpt_data`,
+med filrättigheter 0600. Behåll volymen vid ombyggnad och omstart för att
+behålla samma installation och dess kopplingar. Kör endast en backendprocess
+mot denna volym så att roterande refresh-token inte används samtidigt.
+Kopplingen aktiveras med `CHATGPT_LOCAL_ENABLED=true` i lokal Compose.
+Fjärrpublicering kräver en separat godkänd integration.

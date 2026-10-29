@@ -59,7 +59,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
     try {
       await api.deleteSoldItem(c.url ? { url: c.url } : { title: c.title, source: c.source });
       setRemoved((prev) => new Set(prev).add(key));
-      toast.success("Referensobjekt borttaget – används inte längre vid värdering");
+      toast.success("Referensobjekt dolt för dina värderingar");
     } catch {
       toast.error("Kunde inte ta bort referensobjektet");
     } finally {
@@ -230,7 +230,7 @@ export const AuctionDetail = ({ auction, open, onOpenChange, onAnalyze, onRefres
                           onClick={() => handleRemoveComp(c)}
                           disabled={removing === (c.url || c.title)}
                           data-testid={`remove-comp-${encodeURIComponent(c.url || c.title || "").slice(-16)}`}
-                          title="Ta bort felaktigt referensobjekt"
+                          title="Dölj referensobjekt för dina värderingar"
                           className="shrink-0 rounded-md p-1.5 text-slate-500 transition hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
                         >
                           {removing === (c.url || c.title) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}

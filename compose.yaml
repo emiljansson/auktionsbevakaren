@@ -13,11 +13,18 @@ services:
       dockerfile: Dockerfile
     image: auktiomera-backend:latest
     restart: "no"
+    env_file:
+      - path: ./backend/.env
+        required: false
     environment:
       MONGO_URL: mongodb://mongo:27017
       DB_NAME: auktiomera_local
       ENABLE_BACKGROUND_JOBS: "true"
+      CHATGPT_LOCAL_ENABLED: "true"
+      CHATGPT_STORAGE_DIR: /var/lib/auktiomera/chatgpt
       CORS_ORIGINS: "*"
+    volumes:
+      - chatgpt_data:/var/lib/auktiomera/chatgpt
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -41,6 +48,7 @@ services:
 
 volumes:
   mongo_data:
+  chatgpt_data:
 
 networks:
   auktiomera:

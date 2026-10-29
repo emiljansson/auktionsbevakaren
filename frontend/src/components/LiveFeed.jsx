@@ -112,8 +112,9 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const qRef = useRef(q);
-  qRef.current = q;
+  const qRef = useRef("");
+  const requestRef = useRef(0);
+  const pendingRef = useRef(false);
   const srcRef = useRef(source);
   srcRef.current = source;
   const pageRef = useRef(page);
@@ -124,26 +125,33 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
   const snapRef = useRef(new Date().toISOString());
   const resnap = () => { snapRef.current = new Date().toISOString(); };
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
+    if (background && pendingRef.current) return;
+    const requestId = ++requestRef.current;
+    pendingRef.current = true;
+    if (!background) setLoading(true);
     try {
       const [st, resp] = await Promise.all([
         api.liveStatus(),
         api.liveAuctions({ source: srcRef.current, q: qRef.current || undefined, page: pageRef.current, page_size: 100, snapshot: snapRef.current }),
       ]);
+      if (requestId !== requestRef.current) return;
       setStatus(st);
       setItems(resp.items || []);
       setPages(resp.pages || 1);
       setTotal(resp.total || 0);
     } catch {
-      /* keep previous */
+      if (!background && requestId === requestRef.current) toast.error("Kunde inte hämta annonser. Försök igen.");
     } finally {
-      setLoading(false);
+      if (requestId === requestRef.current) {
+        pendingRef.current = false;
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 10000);
+    const t = setInterval(() => load(true), 10000);
     return () => clearInterval(t);
   }, [load]);
 
@@ -152,6 +160,14 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
   useEffect(() => { load(); }, [source, page, load]);
   // Jump back to the top when the user changes page so they don't lose their place.
   useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [page]);
+
+  const handleSearch = (event) => {
+    event.preventDefault();
+    qRef.current = q.trim();
+    resnap();
+    if (page !== 1) setPage(1);
+    else load();
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -215,12 +231,17 @@ export const LiveFeed = ({ onWatchAdded, onOpen }) => {
 
       {/* Controls */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px]">
+        <form onSubmit={handleSearch} role="search" className="flex min-w-0 basis-full gap-2 sm:flex-1 sm:basis-auto">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (resnap(), setPage(1), load())}
+          <Input value={q} onChange={(e) => setQ(e.target.value)} aria-label="Sök i live-flödet"
             placeholder="Sök i live-flödet (t.ex. grävmaskin, traktor)..." data-testid="live-search"
             className="border-slate-700 bg-slate-900 pl-9 text-slate-100 placeholder:text-slate-600" />
         </div>
+        <Button type="submit" disabled={loading} data-testid="live-search-button" className="shrink-0 bg-amber-500 text-slate-950 hover:bg-amber-400">
+          {loading ? <Loader2 aria-hidden="true" className="mr-1.5 h-4 w-4 animate-spin" /> : <Search aria-hidden="true" className="mr-1.5 h-4 w-4" />} Sök
+        </Button>
+        </form>
         <Select value={source} onValueChange={setSource}>
           <SelectTrigger data-testid="live-source-filter" className="w-44 border-slate-700 bg-slate-900 text-slate-100"><SelectValue /></SelectTrigger>
           <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">

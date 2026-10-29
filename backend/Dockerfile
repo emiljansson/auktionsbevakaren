@@ -20,6 +20,11 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 
 RUN python -m playwright install --with-deps chromium
 
+# All shared dependencies are pinned above; this package has its own index.
+RUN python -m pip install --no-cache-dir --no-deps \
+    --index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ \
+    emergentintegrations==0.2.2
+
 COPY . .
 
 EXPOSE 8000

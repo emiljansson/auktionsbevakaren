@@ -16,6 +16,21 @@ except ImportError:
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 
+
+class ValuationUnavailable(RuntimeError):
+    """AI valuation needs local configuration before it can run."""
+
+
+def require_configured():
+    if not EMERGENT_LLM_KEY:
+        raise ValuationUnavailable(
+            "AI-värdering saknar API-nyckel. Lägg till EMERGENT_LLM_KEY i backend/.env och återskapa backendcontainern."
+        )
+    if LlmChat is None or UserMessage is None:
+        raise ValuationUnavailable(
+            "AI-värderingens bibliotek saknas i backendinstallationen."
+        )
+
 SYSTEM = (
     "Du är en svensk auktions- och prisanalytiker. Du uppskattar nypris och "
     "begagnatpris för produkter på svenska andrahands- och auktionsmarknaden "
@@ -35,7 +50,9 @@ def _extract_json(text: str) -> dict:
 
 
 async def valuate(title: str, current_bid: int, source: str, total_now: int,
-                  comps: list | None = None) -> dict:
+                  comps: list | None = None, complete=None) -> dict:
+    if complete is None:
+        require_configured()
     comps = comps or []
     comps_block = ""
     if comps:
@@ -74,17 +91,15 @@ Returnera JSON med EXAKT dessa fält:
   "insight": "<1-2 meningar på svenska. Nämn om bedömningen bygger på verkliga auktionsslutpriser.>"
 }}"""
 
-    if LlmChat is None or UserMessage is None:
-        raise RuntimeError(
-            "AI-prisvärdering är inte aktiverad i den lokala installationen."
-        )    
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id="valuation",
-        system_message=SYSTEM,
-    ).with_model("openai", "gpt-5.4")
-
-    resp = await chat.send_message(UserMessage(text=prompt))
+    if complete is not None:
+        resp = await complete(SYSTEM, prompt)
+    else:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id="valuation",
+            system_message=SYSTEM,
+        ).with_model("openai", "gpt-5.4")
+        resp = await chat.send_message(UserMessage(text=prompt))
     data = _extract_json(resp if isinstance(resp, str) else str(resp))
     data.setdefault("currency", "SEK")
     # Pass through the REAL sold comparables (not AI-generated) so the UI can

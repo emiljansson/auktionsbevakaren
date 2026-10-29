@@ -13,6 +13,11 @@ axios.interceptors.request.use((config) => {
 });
 
 export const api = {
+  chatgptModels: () => axios.post(`${API}/chatgpt/models`).then((r) => r.data),
+  chatgptStatus: () => axios.get(`${API}/chatgpt/status`).then((r) => r.data),
+  chatgptConnect: (newAccount = false) => axios.post(`${API}/chatgpt/connect`, { new_account: newAccount }).then((r) => r.data),
+  chatgptSettings: (settings) => axios.post(`${API}/chatgpt/settings`, settings).then((r) => r.data),
+  chatgptDisconnect: () => axios.delete(`${API}/chatgpt/connection`).then((r) => r.data),
   listAuctions: (source) =>
     axios.get(`${API}/auctions`, { params: source ? { source } : {} }).then((r) => r.data),
   getAuction: (id) => axios.get(`${API}/auctions/${id}`).then((r) => r.data),
